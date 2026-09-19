@@ -1,0 +1,6 @@
+{
+  "name": "Marketing Operations OS: CAD Engineering Blueprint",
+  "description": "Enterprise CAD Engineering Blueprint Operating System for Dual-Motion (PLG + SLG) Marketing Operations, Demand Unit Scoring, Buying Committee Inspection, and Pipeline Operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

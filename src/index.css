@@ -1,0 +1,331 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #e2e8f0;
+    background-color: #060b13;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'Fira Code', monospace;
+  }
+}
+
+/* CAD Blueprint Engineering Grid Backgrounds */
+.cad-grid-bg {
+  background-color: #050a12;
+  background-image: 
+    linear-gradient(to right, rgba(14, 165, 233, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(14, 165, 233, 0.07) 1px, transparent 1px),
+    linear-gradient(to right, rgba(14, 165, 233, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(14, 165, 233, 0.02) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+}
+
+.cad-panel-grid {
+  background-color: rgba(9, 17, 30, 0.85);
+  background-image: 
+    linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Precision CAD border markers */
+.cad-border {
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  position: relative;
+}
+
+.cad-corner-tl::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid #38bdf8;
+  border-left: 2px solid #38bdf8;
+}
+
+.cad-corner-br::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-bottom: 2px solid #38bdf8;
+  border-right: 2px solid #38bdf8;
+}
+
+/* Blueprint subtle glow */
+.blueprint-glow {
+  box-shadow: 0 0 15px -3px rgba(14, 165, 233, 0.2);
+}
+
+.cyan-glow {
+  box-shadow: 0 0 20px -3px rgba(6, 182, 212, 0.35);
+}
+
+/* Custom scrollbar for CAD console */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #070d17;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e3a5f;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #0284c7;
+}
+
+/* ========================================================================= */
+/* LIGHT BLUEPRINT DRAFTING WHITEPRINT THEME (Architectural CAD Paper Mode)  */
+/* ========================================================================= */
+
+.theme-light {
+  color-scheme: light;
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.theme-light.cad-grid-bg,
+.theme-light .cad-grid-bg {
+  background-color: #f4f6fa !important;
+  background-image: 
+    linear-gradient(to right, rgba(2, 132, 199, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(2, 132, 199, 0.12) 1px, transparent 1px),
+    linear-gradient(to right, rgba(2, 132, 199, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(2, 132, 199, 0.04) 1px, transparent 1px) !important;
+}
+
+.theme-light .cad-panel-grid {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+  background-image: 
+    linear-gradient(to right, rgba(2, 132, 199, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(2, 132, 199, 0.06) 1px, transparent 1px) !important;
+}
+
+.theme-light header {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(14, 165, 233, 0.28) !important;
+}
+
+.theme-light nav {
+  background-color: #ffffff !important;
+  border-color: rgba(14, 165, 233, 0.25) !important;
+}
+
+.theme-light footer {
+  background-color: #ffffff !important;
+  border-color: rgba(14, 165, 233, 0.25) !important;
+}
+
+/* Remap dark card backgrounds to crisp blueprint drafting white/slate panels */
+.theme-light [class*="bg-[#0"] {
+  background-color: #ffffff !important;
+}
+
+.theme-light [class*="bg-slate-900"],
+.theme-light [class*="bg-slate-950"] {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light [class*="bg-cyan-950"] {
+  background-color: #f0f9ff !important;
+  border-color: rgba(14, 165, 233, 0.35) !important;
+}
+
+.theme-light [class*="bg-cyan-900"] {
+  background-color: #e0f2fe !important;
+}
+
+.theme-light [class*="bg-amber-950"] {
+  background-color: #fefce8 !important;
+}
+
+.theme-light [class*="bg-emerald-950"] {
+  background-color: #ecfdf5 !important;
+}
+
+.theme-light [class*="bg-indigo-950"] {
+  background-color: #eef2ff !important;
+}
+
+.theme-light [class*="bg-purple-950"] {
+  background-color: #faf5ff !important;
+}
+
+/* Text adjustments for high contrast in light mode */
+.theme-light [class*="text-white"],
+.theme-light [class*="text-slate-100"] {
+  color: #0f172a !important;
+}
+
+.theme-light [class*="text-slate-200"] {
+  color: #0f172a !important;
+}
+
+.theme-light [class*="text-slate-300"] {
+  color: #1e293b !important;
+}
+
+.theme-light [class*="text-slate-400"] {
+  color: #334155 !important;
+}
+
+.theme-light [class*="text-slate-500"] {
+  color: #475569 !important;
+}
+
+.theme-light [class*="text-slate-600"] {
+  color: #334155 !important;
+}
+
+.theme-light [class*="text-cyan-100"],
+.theme-light [class*="text-cyan-200"] {
+  color: #0c4a6e !important;
+}
+
+.theme-light [class*="text-cyan-300"] {
+  color: #0369a1 !important;
+}
+
+.theme-light [class*="text-cyan-400"] {
+  color: #0284c7 !important;
+}
+
+.theme-light [class*="text-cyan-500"] {
+  color: #0284c7 !important;
+}
+
+.theme-light [class*="text-emerald-400"],
+.theme-light [class*="text-emerald-300"] {
+  color: #047857 !important;
+}
+
+.theme-light [class*="text-amber-400"],
+.theme-light [class*="text-amber-300"] {
+  color: #b45309 !important;
+}
+
+.theme-light [class*="text-rose-400"],
+.theme-light [class*="text-rose-300"] {
+  color: #be123c !important;
+}
+
+.theme-light [class*="text-indigo-400"],
+.theme-light [class*="text-indigo-300"] {
+  color: #4338ca !important;
+}
+
+.theme-light [class*="text-purple-400"],
+.theme-light [class*="text-purple-300"] {
+  color: #6b21a8 !important;
+}
+
+/* User-selected element: Section Accordion Trigger Button in Light Mode */
+.theme-light div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+.theme-light div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) span {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+.theme-light div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) svg {
+  color: #0284c7 !important;
+}
+
+/* User-selected element: Section Accordion Trigger Button in Dark Mode */
+.theme-dark div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1),
+:not(.theme-light) div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) {
+  color: #e2e8f0 !important;
+  font-weight: 700 !important;
+}
+
+.theme-dark div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) span,
+:not(.theme-light) div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) span {
+  color: #e2e8f0 !important;
+}
+
+.theme-dark div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) svg,
+:not(.theme-light) div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(5) > nav:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) svg {
+  color: #22d3ee !important;
+}
+
+.theme-light nav button {
+  color: #0f172a !important;
+}
+
+.theme-light nav button span {
+  color: inherit;
+}
+
+/* Tables in Light Mode */
+.theme-light table {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.theme-light thead,
+.theme-light th {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light td {
+  color: #1e293b !important;
+  border-color: #e2e8f0 !important;
+}
+
+.theme-light tr:hover td {
+  background-color: #f8fafc !important;
+}
+
+.theme-light [class*="border-cyan-500/"],
+.theme-light [class*="border-cyan-400/"],
+.theme-light [class*="border-cyan-900/"] {
+  border-color: rgba(14, 165, 233, 0.3) !important;
+}
+
+.theme-light [class*="border-slate-800"],
+.theme-light [class*="border-slate-700"] {
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light .cad-border {
+  border-color: rgba(14, 165, 233, 0.35) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.theme-light input,
+.theme-light select,
+.theme-light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: rgba(14, 165, 233, 0.35) !important;
+}
+
+.theme-light input::placeholder {
+  color: #94a3b8 !important;
+}
+
+.theme-light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.theme-light ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+}
+.theme-light ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
