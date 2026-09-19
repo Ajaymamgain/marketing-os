@@ -36,8 +36,10 @@ export type CommitteeRoleKey =
 interface AutonomousDemandSimulatorProps {
   accounts: AccountDemandUnit[];
   theme?: 'dark' | 'light';
-  onNavigateTab: (tab: any) => void;
-  onTriggerAiPrompt: (prompt: string) => void;
+  onNavigateTab?: (tab: any) => void;
+  onTriggerAiPrompt?: (prompt: string) => void;
+  onSelectAccount?: (account: AccountDemandUnit) => void;
+  isInnerView?: boolean;
 }
 
 interface SimulatedEvent {
@@ -53,6 +55,8 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
   theme = 'dark',
   onNavigateTab,
   onTriggerAiPrompt,
+  onSelectAccount,
+  isInnerView = false,
 }) => {
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || 'DU-8092');
   const [isSandboxMode, setIsSandboxMode] = useState<boolean>(false);
@@ -773,7 +777,11 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
                 type="button"
                 onClick={() => {
                   const prompt = `Perform a comprehensive autonomous diagnosis of this demand unit simulator state: Telemetry=${telemetry}, Committee=${committee}, Behavioral=${behavioral}, Intent=${intent}, Fit=${fit}. Composite Score is ${compositeScore}/100 in ${stageInfo.label}. The buying committee quorum has ${Object.values(personaEngaged).filter(Boolean).length} of 6 roles engaged (Single-thread warning=${isSingleThreaded}, Infosec blocked=${isInfosecBlocked}). Detail the exact next 3 autonomous playbooks Marketing Ops and Sales should execute.`;
-                  onTriggerAiPrompt(prompt);
+                  if (onTriggerAiPrompt) {
+                    onTriggerAiPrompt(prompt);
+                  } else if (onNavigateTab) {
+                    onNavigateTab('CHATBOT');
+                  }
                 }}
                 className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-mono text-xs font-bold border transition-all cursor-pointer shadow-md ${
                   theme === 'light'
@@ -785,18 +793,58 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
                 <span>ASK GEMINI COPILOT TO DIAGNOSE SIMULATED VECTORS</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => onNavigateTab('DEMAND_UNITS')}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer ${
-                  theme === 'light'
-                    ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sky-200'
-                    : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
-                }`}
-              >
-                <span>OPEN FULL SCORING WORKSTATION [ST.02]</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              {isInnerView ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playCadConfirm();
+                      if (selectedAccount && onSelectAccount) {
+                        onSelectAccount(selectedAccount);
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer border ${
+                      theme === 'light'
+                        ? 'bg-white hover:bg-slate-50 border-slate-300 text-slate-800'
+                        : 'bg-[#091526] hover:bg-[#0d1e38] border-cyan-500/40 text-cyan-300'
+                    }`}
+                  >
+                    <span>OPEN DRAWER SPEC</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playCadConfirm();
+                      if (onNavigateTab) {
+                        onNavigateTab('COMMITTEES');
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer ${
+                      theme === 'light'
+                        ? 'bg-sky-600 hover:bg-sky-700 text-white'
+                        : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold'
+                    }`}
+                  >
+                    <span>COMMITTEE ST.03</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab?.('DEMAND_UNITS')}
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer ${
+                    theme === 'light'
+                      ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sky-200'
+                      : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
+                  }`}
+                >
+                  <span>OPEN FULL SCORING WORKSTATION [ST.02]</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>

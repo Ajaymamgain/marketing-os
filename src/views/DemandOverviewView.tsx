@@ -20,6 +20,7 @@ interface DemandOverviewViewProps {
   accounts: AccountDemandUnit[];
   signals: TelemetrySignal[];
   tasks: OperationalTask[];
+  theme?: 'dark' | 'light';
   onSelectAccount: (account: AccountDemandUnit) => void;
   onNavigateTab: (tab: any) => void;
 }
@@ -28,6 +29,7 @@ export const DemandOverviewView: React.FC<DemandOverviewViewProps> = ({
   accounts,
   signals,
   tasks,
+  theme = 'dark',
   onSelectAccount,
   onNavigateTab,
 }) => {

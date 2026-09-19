@@ -48,6 +48,13 @@ export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   const [isSidebarCompact, setIsSidebarCompact] = useState(false);
+  const [externalAiPrompt, setExternalAiPrompt] = useState<string | undefined>(undefined);
+
+  const handleTriggerAiPrompt = (prompt: string) => {
+    playCadConfirm();
+    setExternalAiPrompt(prompt);
+    setActiveTab('CHATBOT');
+  };
 
   const handleToggleTheme = () => {
     playCadClick();
@@ -224,6 +231,7 @@ export function App() {
                   accounts={visibleAccounts}
                   signals={signals}
                   tasks={tasks}
+                  theme={theme}
                   onSelectAccount={(acc) => setSelectedAccount(acc)}
                   onNavigateTab={(tab) => setActiveTab(tab)}
                 />
@@ -232,7 +240,10 @@ export function App() {
           {activeTab === 'DEMAND_UNITS' && (
             <DemandUnitScoringView
               accounts={visibleAccounts}
+              theme={theme}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              onTriggerAiPrompt={handleTriggerAiPrompt}
             />
           )}
 
@@ -317,6 +328,8 @@ export function App() {
               theme={theme}
               onNavigateTab={(tab) => setActiveTab(tab)}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
+              externalPrompt={externalAiPrompt}
+              onClearExternalPrompt={() => setExternalAiPrompt(undefined)}
             />
           )}
         </main>
