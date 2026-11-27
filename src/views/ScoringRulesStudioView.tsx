@@ -302,8 +302,18 @@ export function ScoringRulesStudioView({
             account/need combinations in this workspace
           </small>
         </span>
-        <span className="dm-model-tag">Rules-based · explainable</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="dm-model-tag">Rules-based · explainable</span>
+          <a href="#decisions" className="dm-text-button text-xs">
+            Decision Inbox <ArrowRight size={13} />
+          </a>
+        </div>
       </div>
+      {!canEdit && (
+        <p className="dm-notice" role="status">
+          Workspace owner permission is required to save drafts or publish active scoring models.
+        </p>
+      )}
       <div className="dm-model-layout">
         <aside className="dm-model-library" aria-label="Scoring model library">
           <div className="dm-model-library-title">

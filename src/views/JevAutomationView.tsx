@@ -12,12 +12,13 @@ import {
 } from 'lucide-react';
 import { ApiDecisionsControl } from '../components/ApiDecisionsControl';
 import { OperationsAgentPanel } from '../components/OperationsAgentPanel';
-import { OperationsJobsPanel } from '../components/OperationsJobsPanel';
 import { fetchJevAutomationStatus, type JevAutomationStatus } from '../services/api';
+import { ActiveNavTab } from '../types';
 
 interface JevAutomationViewProps {
   embedded?: boolean;
   theme?: 'dark' | 'light';
+  onNavigateTab?: (tab: ActiveNavTab) => void;
 }
 
 const timeLabel = (value?: string | null) => {
@@ -36,8 +37,8 @@ const pipeline = [
     key: 'marketo_sync',
     title: 'Collect signals',
     source: 'Marketo ingestion',
-    href: '#connectors',
-    action: 'Review connections',
+    href: '#connections',
+    action: 'Review Connections',
   },
   {
     key: 'audience_reconciliation',
@@ -64,6 +65,7 @@ const reasons: Record<string, string> = {
 export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
   embedded = false,
   theme = 'dark',
+  onNavigateTab,
 }) => {
   const [status, setStatus] = useState<JevAutomationStatus | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -129,7 +131,7 @@ export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
         <div>
           <h1>Automation</h1>
           <p className="auto-subtitle">
-            Your signals, decisions and actions. One place to keep them moving.
+            Workflow scheduling, evaluation cadence, delivery pipeline, and workspace health.
           </p>
         </div>
         <div className="auto-header-actions">
@@ -145,11 +147,26 @@ export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
                 : automation?.running
                   ? 'Evaluation in progress'
                   : status?.decision_engine.provider === 'paused'
-                    ? 'API decisions paused'
+                    ? 'Automatic decisions off'
                     : working && !problem
                       ? 'Evaluation active'
                       : 'Evaluation needs attention'}
           </span>
+          {onNavigateTab ? (
+            <button
+              type="button"
+              className="dm-button dm-button-primary"
+              onClick={() => onNavigateTab('OPERATIONS_DESK')}
+            >
+              Operations Desk
+              <ArrowRight size={15} />
+            </button>
+          ) : (
+            <a className="dm-button dm-button-primary" href="#operations-desk">
+              Operations Desk
+              <ArrowRight size={15} />
+            </a>
+          )}
           <a className="dm-button dm-button-secondary" href="#tasks">
             View activity
             <ArrowRight size={15} />
@@ -185,7 +202,7 @@ export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
                   : live
                     ? 'Approved actions can be sent to connected platforms.'
                     : status?.decision_engine.provider === 'paused'
-                      ? 'API decisions are paused. External platforms receive no changes.'
+                      ? 'Automatic decisions are off. External platforms receive no changes.'
                       : 'Scoring and decisions continue. External platforms receive no changes.'}
             </span>
           </p>
@@ -296,7 +313,37 @@ export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
         </div>
       </section>
 
-      {!embedded && <OperationsJobsPanel light={theme === 'light'} />}
+      {!embedded && (
+        <section
+          className="auto-surface flex flex-wrap items-center justify-between gap-4 px-6 py-4"
+          aria-label="Operations Desk handoff"
+        >
+          <div>
+            <h2 className="text-sm font-semibold text-[#0f172a]">
+              Investigations, checks &amp; review proposals
+            </h2>
+            <p className="mt-0.5 text-xs text-[#64748b]">
+              Run read-only operational workflows, inspect timestamped check evidence, and review
+              proposed changes in Operations Desk.
+            </p>
+          </div>
+          {onNavigateTab ? (
+            <button
+              type="button"
+              className="dm-button dm-button-secondary"
+              onClick={() => onNavigateTab('OPERATIONS_DESK')}
+            >
+              Open Operations Desk
+              <ArrowRight size={14} />
+            </button>
+          ) : (
+            <a href="#operations-desk" className="dm-button dm-button-secondary">
+              Open Operations Desk
+              <ArrowRight size={14} />
+            </a>
+          )}
+        </section>
+      )}
 
       <div className="auto-bottom-grid">
         <section className="auto-surface" aria-labelledby="recent-decisions-title">
@@ -310,7 +357,7 @@ export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
               </p>
             </div>
             <a href="#decisions" className="auto-text-link">
-              Decision inbox
+              Decision Inbox
               <ArrowRight size={14} />
             </a>
           </div>
@@ -447,8 +494,8 @@ export const JevAutomationView: React.FC<JevAutomationViewProps> = ({
                 <dd className="tabular-nums">{timeLabel(automation?.last_completed_at)}</dd>
               </div>
             </dl>
-            <a href="#rules" className="auto-text-link">
-              Open scoring studio
+            <a href="#scoring-studio" className="auto-text-link">
+              Open Scoring Studio
               <ArrowRight size={14} />
             </a>
           </section>

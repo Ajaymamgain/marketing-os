@@ -211,11 +211,16 @@ export const DemandUnitScoringView: React.FC<DemandUnitScoringViewProps> = ({
             intent, and coverage contribute.
           </p>
         </div>
-        <a className="score-studio-config" href="#rules">
-          <Settings2 size={16} aria-hidden="true" />
-          Configure scoring
-          <ArrowRight size={15} aria-hidden="true" />
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <a className="score-studio-config" href="#scoring-studio">
+            <Settings2 size={16} aria-hidden="true" />
+            Configure scoring
+          </a>
+          <a className="dm-button dm-button-primary" href="#decisions">
+            Decision Inbox
+            <ArrowRight size={15} aria-hidden="true" />
+          </a>
+        </div>
       </header>
 
       <section className="score-studio-metrics" aria-label="Scoring portfolio summary">

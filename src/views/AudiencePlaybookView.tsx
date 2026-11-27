@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ArrowRight, RefreshCw, Sparkles, Database, ShieldCheck, Activity, CheckCircle2, Send, Plus, Trash2, ChevronDown, ChevronUp, Layers, X } from 'lucide-react';
-import { AccountDemandUnit, CustomPlaybook } from '../types';
+import { AccountDemandUnit, ActiveNavTab, CustomPlaybook } from '../types';
 import { JevDecisionCard } from '../components/JevDecisionCard';
 import { PlaybookSkillPanel, PlaybookRunHistory } from './PlaybookSkillPanel';
 import {
@@ -21,9 +21,9 @@ import {
   deleteCustomPlaybook,
 } from '../services/api';
 
-interface Props { accounts: AccountDemandUnit[]; loading?: boolean }
+interface Props { accounts: AccountDemandUnit[]; loading?: boolean; onNavigateTab?: (tab: ActiveNavTab) => void }
 
-export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = false }) => {
+export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = false, onNavigateTab }) => {
   const [selectedKey, setSelectedKey] = useState(() => sessionStorage.getItem('dm-playbook-demand-unit') || accounts[0]?.id || '');
   const [accountQuery, setAccountQuery] = useState('');
   const [listId, setListId] = useState('');
@@ -281,10 +281,13 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
         </button>
         <button type="button" className="dm-button dm-button-secondary" disabled={!plan}
           onClick={() => document.getElementById('dm-automation-setup')?.scrollIntoView({block:'start'})}>Map a destination</button>
+        <a href="#decisions" className="dm-button dm-button-secondary" onClick={(e) => { if (onNavigateTab) { e.preventDefault(); onNavigateTab('DECISION_OPS'); } }}>Decision Inbox</a>
+        <a href="#operations-desk" className="dm-button dm-button-secondary" onClick={(e) => { if (onNavigateTab) { e.preventDefault(); onNavigateTab('OPERATIONS_DESK'); } }}>Operations Desk</a>
         <button type="button" className="dm-button dm-button-secondary" disabled={!plan}
           onClick={() => document.getElementById('playbook-runs')?.scrollIntoView({block:'start'})}>Run history <ArrowRight size={16}/></button>
       </div>
     </div>
+    {!canEdit && <div className="dm-notice" role="status"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#64748b]"/><p>Workspace owner permission is required to create eligibility rules, save destination mappings, enable automatic delivery, or apply updates.</p></div>}
     <PlaybookSkillPanel refreshKey={refreshVersion} onApproved={() => setRefreshVersion(value => value + 1)} />
     <div className="dm-status-strip">
       <span className={plan?.mode === 'local' && plan.can_apply ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</span>

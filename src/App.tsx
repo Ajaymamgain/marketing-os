@@ -63,6 +63,9 @@ const CommitteeCoverageInspectorView = lazy(() =>
 const DecisionOperationsView = lazy(() =>
   import('./views/DecisionOperationsView').then((m) => ({ default: m.DecisionOperationsView }))
 );
+const OperationsDeskView = lazy(() =>
+  import('./views/OperationsDeskView').then((m) => ({ default: m.OperationsDeskView }))
+);
 const AudiencePlaybookView = lazy(() =>
   import('./views/AudiencePlaybookView').then((m) => ({ default: m.AudiencePlaybookView }))
 );
@@ -530,11 +533,20 @@ export function App() {
                       signals={signals}
                       accounts={visibleAccounts}
                       onSelectAccount={(acc) => setSelectedAccount(acc)}
+                      onNavigateTab={(tab) => setActiveTab(tab)}
                     />
                   )}
 
+                  {activeTab === 'OPERATIONS_DESK' && (
+                    <OperationsDeskView onNavigateTab={(tab) => setActiveTab(tab)} />
+                  )}
+
                   {activeTab === 'SIGNALS' && (
-                    <AudiencePlaybookView accounts={visibleAccounts} loading={isLoading} />
+                    <AudiencePlaybookView
+                      accounts={visibleAccounts}
+                      loading={isLoading}
+                      onNavigateTab={(tab) => setActiveTab(tab)}
+                    />
                   )}
 
                   {activeTab === 'SIMULATOR' && <SignalSimulatorView theme="light" />}
@@ -559,7 +571,11 @@ export function App() {
                     />
                   )}
                   {activeTab === 'CONNECTORS' && (
-                    <DataConnectorsView key={refreshNonce} connectors={connectors} />
+                    <DataConnectorsView
+                      key={refreshNonce}
+                      connectors={connectors}
+                      onNavigateTab={(tab) => setActiveTab(tab)}
+                    />
                   )}
 
                   {activeTab === 'TASKS' && (
@@ -574,7 +590,12 @@ export function App() {
                     <WorkspaceTerminalView accounts={visibleAccounts} />
                   )}
 
-                  {activeTab === 'AUTOMATION' && <JevAutomationView theme="light" />}
+                  {activeTab === 'AUTOMATION' && (
+                    <JevAutomationView
+                      theme="light"
+                      onNavigateTab={(tab) => setActiveTab(tab)}
+                    />
+                  )}
                 </Suspense>
               </WorkspaceErrorBoundary>
             </main>

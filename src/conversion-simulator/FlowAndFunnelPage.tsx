@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownRight,
+  ArrowUpRight,
   Info,
   Pause,
   Play,
@@ -10,8 +11,8 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { conversionBatchLink, fetchHistoricalReplay, getConversionBatch, runConversionAction } from '../services/api';
-import type {ConversionBatchDetail, ConversionReceipt} from '../services/api';
+import { conversionBatchLink, fetchHistoricalReplay, getConversionBatch, getConversionWorkspace, runConversionAction } from '../services/api';
+import type {ConversionBatchDetail, ConversionReceipt, ConversionWorkspace} from '../services/api';
 import {ConversionSignalImport, inputStyle, outlineButton, primaryButton} from './ConversionSignalImport';
 
 type ValidationResult = {
@@ -668,6 +669,7 @@ export function FlowAndFunnelPage() {
   const [validationRetry, setValidationRetry] = useState(0);
   const evidence = useRef<HTMLDialogElement>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [workspace, setWorkspace] = useState<ConversionWorkspace | null>(null);
   const [imported, setImported] = useState<ConversionBatchDetail | null>(null);
   const [showImported, setShowImported] = useState(false);
   const [rowNumber, setRowNumber] = useState<number | null>(null);
@@ -678,6 +680,17 @@ export function FlowAndFunnelPage() {
   const [exportError, setExportError] = useState(false);
   const [exportMonth, setExportMonth] = useState('');
   const [inquirySource, setInquirySource] = useState('');
+
+  const loadWorkspace = async () => {
+    try {
+      setWorkspace(await getConversionWorkspace());
+    } catch {
+      // Leave workspace null when unavailable so delivery state is never fabricated.
+    }
+  };
+  useEffect(() => {
+    void loadWorkspace();
+  }, []);
 
   const loadRecordedInquiries = async () => {
     setExportLoading(true);
@@ -1024,6 +1037,7 @@ export function FlowAndFunnelPage() {
     setTraceError('');
     selectRow(null);
     setShowImported(true);
+    void loadWorkspace();
     requestAnimationFrame(() => flowchartRef.current?.scrollIntoView({block: 'start'}));
   };
   const loadTrace = async (id: string, open: boolean) => {
@@ -1035,7 +1049,10 @@ export function FlowAndFunnelPage() {
         throw new Error('This flow displays Google Ads conversion batches.');
       }
       if (open) displayBatch(batch);
-      else setImported(batch);
+      else {
+        setImported(batch);
+        void loadWorkspace();
+      }
     } catch (reason) {
       setTraceError(reason instanceof Error ? reason.message : 'Could not load the CRM batch.');
     } finally {
@@ -1086,6 +1103,81 @@ export function FlowAndFunnelPage() {
       conversion_matching: controls.gclidPresent ? 'gclid' : 'email',
     }),
   });
+  const latestWorkspaceBatch = useMemo(
+    () => workspace?.batches.find((item) => item.mode === 'review') || workspace?.batches[0] || null,
+    [workspace],
+  );
+  const deliveryReviewHref = imported
+    ? conversionBatchLink(imported.id, 'history')
+    : latestWorkspaceBatch
+      ? conversionBatchLink(latestWorkspaceBatch.id, 'history')
+      : `/?${uploadQuery}#conversions`;
+  const conversionStatus = useMemo(() => {
+    const deliveryLabel = workspace
+      ? workspace.live_enabled
+        ? 'Live delivery enabled'
+        : 'Review only'
+      : null;
+
+    if (imported && realRow) {
+      const isReceiptOutcome =
+        realRow.state === 'accepted' ||
+        realRow.state === 'processed' ||
+        realRow.state === 'sending' ||
+        realRow.state === 'failed' ||
+        realRow.state === 'uncertain';
+
+      if (!isReceiptOutcome) {
+        const base =
+          realRow.state === 'blocked'
+            ? 'Saved CRM record in review · Held'
+            : 'Saved CRM record in review';
+        return {
+          kind: realRow.state === 'blocked' ? 'crm-held' : 'crm-review',
+          label: deliveryLabel ? `${base} · ${deliveryLabel}` : base,
+          dotClass:
+            realRow.state === 'blocked'
+              ? 'bg-rose-600'
+              : workspace?.live_enabled
+                ? 'bg-teal-600'
+                : 'bg-slate-500',
+          textClass: realRow.state === 'blocked' ? 'text-rose-700' : 'text-slate-700',
+        };
+      }
+
+      const stateText = receiptStates[realRow.state] || realRow.state;
+      const base = `Saved CRM record · ${stateText}`;
+      const isError = realRow.state === 'failed';
+      const isCaution = realRow.state === 'uncertain' || realRow.state === 'sending';
+      const isConfirmed = realRow.state === 'accepted' || realRow.state === 'processed';
+      return {
+        kind: `crm-${realRow.state}`,
+        label: deliveryLabel ? `${base} · ${deliveryLabel}` : base,
+        dotClass: isError
+          ? 'bg-rose-600'
+          : isCaution
+            ? 'bg-amber-500'
+            : isConfirmed
+              ? 'bg-emerald-600'
+              : 'bg-slate-500',
+        textClass: isError
+          ? 'text-rose-700'
+          : isCaution
+            ? 'text-amber-800'
+            : isConfirmed
+              ? 'text-emerald-800'
+              : 'text-slate-700',
+      };
+    }
+
+    const base = 'Synthetic example';
+    return {
+      kind: workspace?.live_enabled ? 'synthetic-live' : 'synthetic-review',
+      label: deliveryLabel ? `${base} · ${deliveryLabel}` : base,
+      dotClass: workspace?.live_enabled ? 'bg-teal-600' : 'bg-slate-400',
+      textClass: 'text-slate-700',
+    };
+  }, [imported, realRow, workspace]);
   const validationText = validation?.state === 'ready'
     ? `Eligible locally · ${validation.matched_by}`
     : validation?.state === 'blocked'
@@ -1342,26 +1434,43 @@ export function FlowAndFunnelPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
-      <header className="sticky top-0 z-30 h-[60px] bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between gap-2 lg:gap-8">
-        <a href="#funnel" className="text-sm sm:text-base font-bold tracking-tight text-slate-900 font-display whitespace-nowrap">
-          Google Ads Conversions
-        </a>
-        <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-600" aria-label="Conversion example">
-          <a href="#funnel" className="hover:text-slate-900 whitespace-nowrap">Demand Funnel</a>
-          <a href="#campaign-timeline" className="hover:text-slate-900 whitespace-nowrap">Campaign Timeline</a>
-          <a href="#flowchart" className="hover:text-slate-900 whitespace-nowrap">Interactive Flowchart</a>
-        </nav>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={openWorkspaceData}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-            <Sparkles className="size-3.5" />
-            <span className="sr-only sm:not-sr-only">Workspace data</span>
-          </button>
-          <button type="button" onClick={() => setUploadOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-2 text-xs font-semibold text-white hover:bg-teal-800">
-            <Upload className="size-3.5" />
-            Upload signal
-          </button>
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
+        <div className="min-h-[56px] px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 lg:gap-6">
+          <a href="#funnel" className="text-sm sm:text-base font-bold tracking-tight text-slate-900 font-display whitespace-nowrap">
+            Google Ads Conversions
+          </a>
+          <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600" aria-label="Conversion example">
+            <a href="#funnel" className="hover:text-slate-900 whitespace-nowrap">Demand Funnel</a>
+            <a href="#campaign-timeline" className="hover:text-slate-900 whitespace-nowrap">Campaign Timeline</a>
+            <a href="#flowchart" className="hover:text-slate-900 whitespace-nowrap">Interactive Flowchart</a>
+          </nav>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={openWorkspaceData}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+              <Sparkles className="size-3.5" />
+              <span className="sr-only sm:not-sr-only">Workspace data</span>
+            </button>
+            <a href={deliveryReviewHref} target="_top"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50">
+              <span>Delivery review</span>
+              <ArrowUpRight className="size-3.5 text-slate-500" aria-hidden="true" />
+            </a>
+            <button type="button" onClick={() => setUploadOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-800">
+              <Upload className="size-3.5" />
+              Upload signal
+            </button>
+          </div>
+        </div>
+        <div className="border-t border-slate-100 bg-slate-50/80 px-3 sm:px-6 py-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
+          <p role="status" data-conversion-status={conversionStatus.kind} className={`inline-flex items-center gap-2 font-medium ${conversionStatus.textClass}`}>
+            <span className={`size-2 shrink-0 rounded-full ${conversionStatus.dotClass}`} aria-hidden="true" />
+            <span>{conversionStatus.label}</span>
+          </p>
+          <a href={`/?${uploadQuery}#conversions`} target="_top"
+            className="font-medium text-slate-600 hover:text-slate-900 underline-offset-2 hover:underline whitespace-nowrap">
+            Offline conversions (Google Ads, Meta, LinkedIn)
+          </a>
         </div>
       </header>
       <main className="flex-1 px-3 sm:px-6 py-7">

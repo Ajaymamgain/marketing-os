@@ -228,6 +228,7 @@ export type ActiveNavTab =
   | 'COMMITTEES'
   | 'COVERAGE'
   | 'DECISION_OPS'
+  | 'OPERATIONS_DESK'
   | 'SIGNALS'
   | 'SIMULATOR'
   | 'CONVERSIONS'

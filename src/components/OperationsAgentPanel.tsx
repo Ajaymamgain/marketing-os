@@ -39,11 +39,11 @@ export function OperationsAgentPanel({ light }: { light: boolean }) {
   }
   const latest = review || status?.runs?.[0]?.result;
   const ready = status?.enabled && status?.installed;
-  return <section className="auto-surface auto-checks" data-theme={light ? 'light' : 'dark'} aria-labelledby="pi-operations-title">
-    <div className="auto-section-heading"><div><h2 id="pi-operations-title">Workspace checks</h2><p>Inspect service health and queued work.</p></div><span className={`auto-badge ${ready ? 'is-success' : 'is-neutral'}`}>{!status ? 'Checking…' : ready ? 'Available' : 'Unavailable'}</span></div>
+  return <section className="auto-surface auto-checks" data-theme={light ? 'light' : 'dark'} aria-labelledby="workspace-checks-title">
+    <div className="auto-section-heading"><div><h2 id="workspace-checks-title">Workspace checks</h2><p>Inspect service health and queued work.</p></div><span className={`auto-badge ${ready ? 'is-success' : 'is-neutral'}`}>{!status ? 'Checking…' : ready ? 'Available' : 'Unavailable'}</span></div>
     <button className="dm-button dm-button-secondary auto-full-button" onClick={() => void run()} disabled={!ready || !owner || running}>{running ? <RefreshCw size={16} className="animate-spin" /> : <Activity size={16} />}{running ? 'Reviewing workspace…' : 'Run workspace review'}</button>
     <p className="auto-help">Up to 4 checks · 90-second limit</p>
-    {!owner && status && <p className="auto-help">A workspace owner can run this review.</p>}
+    {!owner && status && <p className="auto-help">Workspace owner permission is required to run workspace checks.</p>}
     {error && <p className="auto-error" role="alert">{error}</p>}
     {latest && <div className="auto-latest-review" aria-live="polite"><strong>{latest.stop_reason === 'uncertain_decision' ? 'Last review ended early' : latest.success ? 'Last review completed' : latest.status === 'timed_out' ? 'Last review timed out' : 'Last review needs attention'}</strong>
       {latest.steps?.length ? <ul>{latest.steps.map((step, index) => <li key={index}>{labels[step.action] || 'Operations check'}<span className={step.status === 'completed' ? 'text-[#15803d]' : ''}>{step.status}</span></li>)}</ul> : <p className="auto-help">No checks completed.</p>}

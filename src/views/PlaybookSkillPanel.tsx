@@ -46,7 +46,7 @@ export function PlaybookSkillPanel({refreshKey, onApproved}: {refreshKey: number
         <h2 id="pb-skill-title">Playbook skills</h2>
         <p className="dm-muted">Review the procedures and MCP tools that power this workspace’s playbooks.</p>
       </div>
-      <a href="#connectors" className="dm-button dm-button-secondary"><Link2 size={15}/> Manage connections</a>
+      <a href="#connections" className="dm-button dm-button-secondary"><Link2 size={15}/> Manage Connections</a>
     </div>
     {error && <p role="alert" className="dm-notice dm-notice-warning">{error}</p>}
     {!binding && !error && <p className="dm-muted" role="status">Loading playbook skills…</p>}
@@ -77,6 +77,9 @@ export function PlaybookSkillPanel({refreshKey, onApproved}: {refreshKey: number
         </button>
         <span className="dm-muted">Existing enabled mappings will use this MCP account.</span>
       </div>}
+      {!binding.ready && binding.missing.length === 0 && !catalog.can_approve && (
+        <p className="dm-muted">Workspace owner permission is required to approve Marketo skills and tools.</p>
+      )}
     </div>}
     {catalog && <details className="pb-skill-details">
       <summary>Published MCP skills <span className="dm-badge">{catalog.skills.length}</span></summary>

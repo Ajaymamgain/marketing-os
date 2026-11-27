@@ -1,18 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Search, ShieldCheck, X } from 'lucide-react';
-import { TelemetrySignal, AccountDemandUnit } from '../types';
+import { TelemetrySignal, AccountDemandUnit, ActiveNavTab } from '../types';
 import { fetchDecisionRecommendations, DecisionRecommendation } from '../services/api';
 
 interface Props {
   signals: TelemetrySignal[];
   accounts: AccountDemandUnit[];
   onSelectAccount: (account: AccountDemandUnit) => void;
+  onNavigateTab?: (tab: ActiveNavTab) => void;
 }
 
 type DecisionFilter = 'all' | 'blocked' | 'ready';
 type DecisionSort = 'score' | 'coverage_asc' | 'name';
 
-export const DecisionOperationsView: React.FC<Props> = ({ accounts, onSelectAccount }) => {
+export const DecisionOperationsView: React.FC<Props> = ({
+  accounts,
+  onSelectAccount,
+  onNavigateTab,
+}) => {
   const [items, setItems] = useState<DecisionRecommendation[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -93,12 +98,38 @@ export const DecisionOperationsView: React.FC<Props> = ({ accounts, onSelectAcco
     <div className="mx-auto max-w-[1440px] space-y-6">
       <div className="dm-page-heading">
         <div>
-          <h1>Decision inbox</h1>
-          <p>Review policy blockers and the next operating step for each demand unit.</p>
+          <h1>Decision Inbox</h1>
+          <p>Review policy holds and the next operating step for each demand unit.</p>
         </div>
-        <a href="#automation" className="dm-button">
-          Inspect automation <ArrowRight size={15} />
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          {onNavigateTab ? (
+            <>
+              <button
+                type="button"
+                className="dm-button"
+                onClick={() => onNavigateTab('OPERATIONS_DESK')}
+              >
+                Operations Desk
+              </button>
+              <button
+                type="button"
+                className="dm-button dm-button-primary"
+                onClick={() => onNavigateTab('SIGNALS')}
+              >
+                Open Playbooks <ArrowRight size={15} />
+              </button>
+            </>
+          ) : (
+            <>
+              <a href="#operations-desk" className="dm-button">
+                Operations Desk
+              </a>
+              <a href="#playbooks" className="dm-button dm-button-primary">
+                Open Playbooks <ArrowRight size={15} />
+              </a>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -122,8 +153,8 @@ export const DecisionOperationsView: React.FC<Props> = ({ accounts, onSelectAcco
       <div className="dm-notice">
         <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#64748b]" />
         <p>
-          This is the product review queue. Automated provider execution requires a current
-          recommendation, approved mappings, and consent checks.
+          Decision Inbox shows recorded recommendations and held actions. Provider delivery only
+          runs in Playbooks after coverage, destination mapping, and consent checks pass.
         </p>
       </div>
 
@@ -295,13 +326,26 @@ export const DecisionOperationsView: React.FC<Props> = ({ accounts, onSelectAcco
                   <a
                     className="dm-text-button"
                     href="#playbooks"
-                    onClick={() => {
+                    onClick={(event) => {
                       sessionStorage.setItem('dm-playbook-demand-unit', item.demand_unit_key);
+                      if (onNavigateTab) {
+                        event.preventDefault();
+                        onNavigateTab('SIGNALS');
+                      }
                     }}
                   >
-                    Open playbook
+                    Open in Playbooks
                   </a>
-                  <a className="dm-text-button" href="#tasks">
+                  <a
+                    className="dm-text-button"
+                    href="#tasks"
+                    onClick={(event) => {
+                      if (onNavigateTab) {
+                        event.preventDefault();
+                        onNavigateTab('TASKS');
+                      }
+                    }}
+                  >
                     View activity
                   </a>
                 </div>
