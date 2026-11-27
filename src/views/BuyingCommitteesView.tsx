@@ -125,14 +125,13 @@ export const BuyingCommitteesView: React.FC<Props> = ({
     <div className="mx-auto max-w-[1440px] space-y-6">
       <div className="dm-page-heading">
         <div>
-          <p className="dm-eyebrow">DEMAND INTELLIGENCE</p>
           <h1>Buying committees</h1>
           <p>
             Automatically map the people behind each buying need, with evidence
             for every role.
           </p>
         </div>
-        <span className="dm-badge">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1d4ed8]">
           <Sparkles size={14} />
           Automatic role inference
         </span>
@@ -161,16 +160,16 @@ export const BuyingCommitteesView: React.FC<Props> = ({
         ].map(([label, value, note]) => (
           <article key={String(label)} className="dm-card dm-metric">
             <div>{label}</div>
-            <strong>{value}</strong>
+            <strong>{Number(value).toLocaleString()}</strong>
             <p>{note}</p>
           </article>
         ))}
       </div>
       <details className="dm-card dm-committee-automation">
         <summary className="dm-committee-help-summary">
-          <Sparkles size={18} />
+          <Sparkles size={16} className="text-[#1d4ed8]" />
           How the committee is built
-          <ChevronDown size={16} />
+          <ChevronDown size={16} className="text-[#64748b]" />
         </summary>
         <p className="dm-caption mt-3">
           Runs during scoring after imports and on scheduled refreshes. No
@@ -203,7 +202,7 @@ export const BuyingCommitteesView: React.FC<Props> = ({
           </div>
         </div>
         <div className="dm-committee-policy">
-          <ShieldCheck size={17} />
+          <ShieldCheck size={16} />
           <p>
             A senior title or a pricing visit does not establish a champion.
             Internal advocacy needs its own recorded evidence. Consent and the
@@ -218,7 +217,7 @@ export const BuyingCommitteesView: React.FC<Props> = ({
       )}
       {notice && (
         <div role="status" className="dm-notice">
-          <Check size={18} />
+          <Check size={16} />
           {notice}
         </div>
       )}
@@ -227,7 +226,7 @@ export const BuyingCommitteesView: React.FC<Props> = ({
           Search demand units
           <input
             className="dm-input"
-            placeholder="Account, domain, or need"
+            placeholder="Account, domain, or need…"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -255,33 +254,36 @@ export const BuyingCommitteesView: React.FC<Props> = ({
           </select>
         </label>
       </section>
-      <div className="grid gap-5 lg:grid-cols-[1fr_1.3fr]">
-        <section className="space-y-3 order-2 lg:order-1 self-start lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
-          <p className="dm-caption">{filtered.length} matching demand units</p>
+      <div className="grid gap-5 lg:grid-cols-[1fr_1.35fr]">
+        <section className="space-y-2.5 order-2 lg:order-1 self-start lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+          <p className="dm-caption tabular-nums">{filtered.length} matching demand units</p>
           {filtered.slice(0, limit).map((a) => (
             <button
               key={a.id}
+              type="button"
               className={`dm-committee-unit ${selected?.id === a.id ? "is-selected" : ""}`}
               onClick={() => setSelectedId(a.id)}
             >
               <div className="flex justify-between items-start gap-3">
-                <div>
-                  <h2 className="font-semibold text-sm">{a.accountName}</h2>
-                  <p className="dm-caption mt-1">{a.solutionTarget}</p>
+                <div className="min-w-0">
+                  <h2 className="font-semibold text-sm text-[#0f172a]">{a.accountName}</h2>
+                  <p className="dm-caption mt-0.5 truncate">{a.solutionTarget}</p>
                 </div>
                 <span
-                  className={`dm-badge ${a.committee.coverageScore === 0 ? "dm-badge-amber" : ""}`}
+                  className={`text-xs font-semibold tabular-nums shrink-0 ${
+                    a.committee.coverageScore === 0 ? "text-[#b45309]" : "text-[#1d4ed8]"
+                  }`}
                 >
                   {a.committee.coverageScore}% coverage
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-[#e7edf7] mt-4">
+              <div className="h-1.5 rounded-full bg-[#e2e8f0] mt-3.5 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-[#2457d6]"
+                  className="h-full rounded-full bg-[#1d4ed8]"
                   style={{ width: `${a.committee.coverageScore}%` }}
                 />
               </div>
-              <p className="dm-caption mt-3">
+              <p className="dm-caption mt-2.5 tabular-nums">
                 {a.committee.members.length} identified ·{" "}
                 {
                   a.committee.members.filter((m) => m.status === "active")
@@ -289,11 +291,11 @@ export const BuyingCommitteesView: React.FC<Props> = ({
                 }{" "}
                 coverage-ready
               </p>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                 {roles.map((r) => (
                   <span
                     key={r.id}
-                    className={`text-xs ${a.committee.missingRoles.includes(r.id) ? "text-[#875008]" : "text-[#1c7552]"}`}
+                    className={`text-xs ${a.committee.missingRoles.includes(r.id) ? "text-[#b45309]" : "text-[#15803d]"}`}
                   >
                     {a.committee.missingRoles.includes(r.id) ? "○" : "✓"}{" "}
                     {r.name}
@@ -309,6 +311,7 @@ export const BuyingCommitteesView: React.FC<Props> = ({
           )}
           {filtered.length > limit && (
             <button
+              type="button"
               className="dm-button w-full"
               onClick={() => setLimit((v) => v + 12)}
             >
@@ -316,7 +319,7 @@ export const BuyingCommitteesView: React.FC<Props> = ({
             </button>
           )}
         </section>
-        <section className="dm-card self-start order-1 lg:order-2 lg:sticky lg:top-24">
+        <section className="dm-card self-start order-1 lg:order-2 lg:sticky lg:top-20">
           {selected ? (
             <>
               <div className="dm-section-title">
@@ -325,50 +328,55 @@ export const BuyingCommitteesView: React.FC<Props> = ({
                   <p>{selected.solutionTarget}</p>
                 </div>
                 <button
+                  type="button"
                   className="dm-text-button"
                   onClick={() => onSelectAccount(selected)}
                 >
-                  Inspect demand <ArrowRight size={15} />
+                  Inspect demand <ArrowRight size={14} />
                 </button>
               </div>
-              <h3 className="font-semibold text-sm mt-6 flex gap-2 items-center">
-                <Users size={17} />
+              <h3 className="font-semibold text-sm mt-5 flex gap-2 items-center text-[#0f172a]">
+                <Users size={16} className="text-[#64748b]" />
                 People & role evidence
               </h3>
-              <p className="dm-caption mt-2">
+              <p className="dm-caption mt-1">
                 Roles belong to this buying need. The same person can play a
                 different role for another purchase.
               </p>
-              <div className="divide-y mt-4">
+              <div className="divide-y divide-[#e2e8f0] mt-3">
                 {committeeMembers.map((member) => (
-                  <article key={member.id} className="py-5">
+                  <article key={member.id} className="py-4">
                     <div className="flex justify-between gap-3">
                       <div>
-                        <p className="font-medium text-sm">{member.name}</p>
+                        <p className="font-semibold text-sm text-[#0f172a]">{member.name}</p>
                         <p className="dm-caption">{member.title}</p>
                       </div>
                       <span
-                        className={`dm-badge h-fit ${member.status === "active" ? "" : "dm-badge-amber"}`}
+                        className={`text-xs font-semibold shrink-0 ${
+                          member.status === "active" ? "text-[#15803d]" : "text-[#b45309]"
+                        }`}
                       >
                         {member.status === "active"
                           ? "Counts for coverage"
                           : "Not counted"}
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-2 items-center mt-3">
-                      <strong className="text-sm">
+                    <div className="flex flex-wrap gap-x-2.5 gap-y-1 items-baseline mt-2.5 text-sm">
+                      <strong className="font-semibold text-[#0f172a]">
                         {member.role === "unknown"
                           ? "Role not established"
                           : overrideRoles.find(
                               (role) => role.id === member.role,
                             )?.name || member.role.replaceAll("_", " ")}
                       </strong>
-                      <span className="dm-badge">{inferenceLabel(member)}</span>
+                      <span className="text-[#cbd5e1]" aria-hidden="true">·</span>
+                      <span className="text-xs font-medium text-[#1d4ed8]">
+                        {inferenceLabel(member)}
+                      </span>
                       {member.roleSource?.startsWith("jev") &&
                         (member.roleConfidence || 0) > 0 && (
-                          <span className="dm-caption">
-                            {Math.round((member.roleConfidence || 0) * 100)}%
-                            model confidence
+                          <span className="dm-caption tabular-nums">
+                            · {Math.round((member.roleConfidence || 0) * 100)}% confidence
                           </span>
                         )}
                     </div>

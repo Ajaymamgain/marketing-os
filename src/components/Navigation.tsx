@@ -1,13 +1,129 @@
-import React from 'react';
-import { LayoutDashboard, Filter, Milestone, Grid, Users, Network, CheckSquare, BookOpen, SlidersHorizontal, Sparkles, Inbox, FlaskConical, ShieldCheck, LogIn, Target } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { ChevronsLeft, ChevronsRight, ExternalLink, X } from 'lucide-react';
 import { ActiveNavTab } from '../types';
-interface NavigationProps { activeTab: ActiveNavTab; onSelectTab: (tab: ActiveNavTab) => void; urgentTaskCount: number; criticalSignalCount: number; isCompact?: boolean; onToggleCompact?: () => void; onHideSidebar?: () => void; theme?: 'dark' | 'light'; }
-const groups: { label: string; items: { id: ActiveNavTab; label: string; icon: typeof Grid }[] }[] = [
-  { label: 'Demand intelligence', items: [{ id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard }, { id: 'FUNNEL', label: 'Demand funnel', icon: Filter }, { id: 'JOURNEY', label: 'Customer journey', icon: Milestone }, { id: 'ACCOUNTS', label: 'Account matrix', icon: Grid }, { id:'SEGMENTS',label:'Segments',icon:Grid }, {id:'INTELLIGENCE',label:'Intelligence',icon:BookOpen}, { id: 'COMMITTEES', label: 'Buying committees', icon: Users }, { id: 'DEMAND_UNITS', label: 'Demand scoring', icon: Target }] },
-  { label: 'Marketing operations', items: [{ id: 'CONVERSIONS', label: 'Conversions', icon: FlaskConical }, { id: 'SIGNALS', label: 'Playbooks', icon: BookOpen }, { id: 'DECISION_OPS', label: 'Decision inbox', icon: Inbox }, { id: 'TASKS', label: 'Operational activity', icon: CheckSquare }, { id: 'AUTOMATION', label: 'Automation', icon: Sparkles }] },
-  { label: 'Workspace', items: [{ id: 'RULES', label: 'Scoring studio', icon: SlidersHorizontal }, { id: 'CONNECTORS', label: 'Connections', icon: Network }, { id: 'COVERAGE', label: 'Coverage checks', icon: ShieldCheck }, { id: 'SIMULATOR', label: 'Data imports & replay', icon: FlaskConical }, { id: 'TERMINAL', label: 'Workspace access', icon: LogIn }] },
-];
-export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }) => <nav aria-label="Main navigation" className="dm-sidebar w-full md:w-[244px] shrink-0 border-r bg-white md:sticky md:top-[73px] md:h-[calc(100dvh-73px)] overflow-y-auto">
-  <div className="px-3 py-4 space-y-5">{groups.map((group) => <div key={group.label}><p className="dm-nav-heading">{group.label}</p><div className="space-y-1 mt-2">{group.items.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => onSelectTab(id)} className={`dm-nav-link ${activeTab === id ? 'is-active' : ''}`} aria-current={activeTab === id ? 'page' : undefined}><Icon size={18} strokeWidth={1.8} /><span>{label}</span></button>)}</div></div>)}</div>
-  <div className="p-4 border-t"><p className="text-xs leading-5 text-[#64748b]">Evidence → score → decision → action</p><button className="dm-text-button mt-1" onClick={() => onSelectTab('LANDING')}>View product website ↗</button></div>
-</nav>;
+import {
+  PRIMARY_SECTIONS,
+  FOOTER_SECTIONS,
+  getWorkspaceSection,
+  WorkspaceSection,
+} from '../config/workspaceNav';
+
+interface NavigationProps {
+  activeTab: ActiveNavTab;
+  onSelectTab: (tab: ActiveNavTab) => void;
+  urgentTaskCount: number;
+  coverageHoldCount?: number;
+  isCompact?: boolean;
+  onToggleCompact?: () => void;
+  onHideSidebar?: () => void;
+}
+
+export const Navigation: React.FC<NavigationProps> = ({
+  activeTab,
+  onSelectTab,
+  urgentTaskCount,
+  isCompact = false,
+  onToggleCompact,
+  onHideSidebar,
+}) => {
+  const { section: activeSection } = getWorkspaceSection(activeTab);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && onHideSidebar && window.matchMedia('(max-width: 767px)').matches) {
+        onHideSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onHideSidebar]);
+
+  const renderSectionLink = (section: WorkspaceSection) => {
+    const Icon = section.icon;
+    const isActive = activeSection?.id === section.id;
+    const count = section.id === 'operations' && urgentTaskCount > 0 ? urgentTaskCount : 0;
+
+    return (
+      <button
+        key={section.id}
+        type="button"
+        onClick={() => onSelectTab(section.defaultTab)}
+        title={isCompact ? section.label : undefined}
+        className={`dm-nav-link ${isActive ? 'is-active' : ''} ${
+          isCompact ? 'md:justify-center md:px-0' : ''
+        }`}
+        aria-current={isActive ? 'page' : undefined}
+      >
+        <Icon size={17} strokeWidth={1.8} className="shrink-0" />
+        <span className={`truncate ${isCompact ? 'md:hidden' : ''}`}>{section.label}</span>
+        {count > 0 && !isCompact && (
+          <span className="ml-auto text-xs font-semibold tabular-nums text-[#b45309]">
+            {count}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-30 bg-[#0f172a]/30 backdrop-blur-[1px] md:hidden"
+        onClick={onHideSidebar}
+        aria-hidden="true"
+      />
+      <nav
+        aria-label="Main navigation"
+        className={`dm-sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[#e2e8f0] bg-white transition-[width] duration-150 md:sticky md:top-14 md:z-auto md:h-[calc(100dvh-56px)] shrink-0 ${
+          isCompact ? 'w-[244px] md:w-[68px]' : 'w-[248px] md:w-[228px]'
+        }`}
+      >
+        <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-3 md:hidden">
+          <span className="text-sm font-semibold text-[#0f172a]">Navigation</span>
+          <button
+            type="button"
+            className="dm-icon-button"
+            onClick={onHideSidebar}
+            aria-label="Close navigation"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-2.5 py-4 space-y-1">
+          {PRIMARY_SECTIONS.map(renderSectionLink)}
+        </div>
+
+        <div className="border-t border-[#e2e8f0] px-2.5 py-3 space-y-1">
+          {FOOTER_SECTIONS.map(renderSectionLink)}
+
+          {!isCompact && (
+            <button
+              type="button"
+              className="dm-nav-link text-[#64748b]"
+              onClick={() => onSelectTab('LANDING')}
+            >
+              <ExternalLink size={16} strokeWidth={1.8} className="shrink-0" />
+              <span className="truncate">Product website</span>
+            </button>
+          )}
+
+          {onToggleCompact && (
+            <button
+              type="button"
+              onClick={onToggleCompact}
+              className={`hidden md:flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0f172a] ${
+                isCompact ? 'justify-center px-0' : ''
+              }`}
+              title={isCompact ? 'Expand navigation' : 'Collapse navigation'}
+              aria-label={isCompact ? 'Expand navigation' : 'Collapse navigation'}
+            >
+              {isCompact ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
+              {!isCompact && <span>Collapse rail</span>}
+            </button>
+          )}
+        </div>
+      </nav>
+    </>
+  );
+};

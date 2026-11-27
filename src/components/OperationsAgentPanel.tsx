@@ -46,7 +46,7 @@ export function OperationsAgentPanel({ light }: { light: boolean }) {
     {!owner && status && <p className="auto-help">A workspace owner can run this review.</p>}
     {error && <p className="auto-error" role="alert">{error}</p>}
     {latest && <div className="auto-latest-review" aria-live="polite"><strong>{latest.stop_reason === 'uncertain_decision' ? 'Last review ended early' : latest.success ? 'Last review completed' : latest.status === 'timed_out' ? 'Last review timed out' : 'Last review needs attention'}</strong>
-      {latest.steps?.length ? <ul>{latest.steps.map((step, index) => <li key={index}><span className={`auto-status-dot ${step.status === 'completed' ? 'is-success' : ''}`} />{labels[step.action] || 'Operations check'}<span>{step.status}</span></li>)}</ul> : <p className="auto-help">No checks completed.</p>}
+      {latest.steps?.length ? <ul>{latest.steps.map((step, index) => <li key={index}>{labels[step.action] || 'Operations check'}<span className={step.status === 'completed' ? 'text-[#15803d]' : ''}>{step.status}</span></li>)}</ul> : <p className="auto-help">No checks completed.</p>}
       {latest.stop_reason === 'uncertain_decision' && <p className="auto-help">The completed checks are recorded. Further steps need more evidence.</p>}</div>}
     <a className="auto-text-link" href="/security">Account security<ArrowRight size={14} /></a>
   </section>;

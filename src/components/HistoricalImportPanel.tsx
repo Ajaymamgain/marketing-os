@@ -60,7 +60,7 @@ export function HistoricalImportPanel() {
     finally {setBusy(null);}
   };
   return <section className="dm-backfill dm-panel" aria-label="Customer data backfill">
-    <div className="dm-section-heading"><div><p className="dm-eyebrow">CUSTOMER ONBOARDING</p><h2><Database size={18}/> Import historical data</h2><p className="dm-muted">Add authorized historical exports to the workspace event ledger. Preview identities, dates and mappings before importing; provider delivery stays on hold.</p></div><span className="dm-badge"><ShieldCheck size={13}/> Tenant-scoped backfill</span></div>
+    <div className="dm-section-heading"><div><h2><Database size={18}/> Import historical data</h2><p className="dm-muted">Add authorized historical exports to the workspace event ledger. Preview identities, dates and mappings before importing; provider delivery stays on hold.</p></div><span className="dm-badge"><ShieldCheck size={13}/> Tenant-scoped backfill</span></div>
     <p className="dm-notice">This import changes workspace data. Accepted events queue scoring and next-action evaluation; automatic evaluations wait while automatic decisions are off. The chart replay below only changes the view.</p>
     {error && <p role="alert" className="dm-notice dm-notice-warning">{error}</p>}
     {historyError && <p role="status" className="dm-notice dm-notice-warning">Import history is temporarily unavailable: {historyError}</p>}

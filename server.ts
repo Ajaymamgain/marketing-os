@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -7,6 +8,16 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const productApiUrl = (process.env.DUAL_MOTION_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+
+function resolveRootDir(): string {
+  if (typeof __dirname !== 'undefined') {
+    return path.resolve(__dirname);
+  }
+  if (typeof import.meta !== 'undefined' && import.meta.url) {
+    return path.dirname(fileURLToPath(import.meta.url));
+  }
+  return process.cwd();
+}
 
 app.disable('x-powered-by');
 let activeImports = 0;
@@ -80,7 +91,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 async function startServer() {
-  const rootDir = path.resolve(__dirname);
+  const rootDir = resolveRootDir();
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({ root: rootDir, server: { middlewareMode: true }, appType: 'spa' });
@@ -109,4 +120,7 @@ async function startServer() {
   process.on('SIGINT', shutdown);
 }
 
-startServer().catch(() => { console.error('Web server startup failed'); process.exit(1); });
+startServer().catch((err) => {
+  console.error('Web server startup failed:', err);
+  process.exit(1);
+});

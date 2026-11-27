@@ -15,7 +15,6 @@ export function ModelEvidenceFields({ settings: s, onChange, section }: Props) {
     return (
       <div className="dm-model-fields">
         <section className="dm-model-panel">
-          <p className="dm-model-kicker">01 / COMPANY PROFILE</p>
           <h2>What does a good customer look like?</h2>
           <p className="dm-model-note">
             Known company attributes earn fit points. Missing data stays
@@ -74,7 +73,6 @@ export function ModelEvidenceFields({ settings: s, onChange, section }: Props) {
           </div>
         </section>
         <section className="dm-model-panel">
-          <p className="dm-model-kicker">02 / FIT CONTRIBUTIONS</p>
           <h2>Weight the attributes that matter</h2>
           <p className="dm-model-note">
             These weights live inside fit. They must total 100%.
@@ -158,7 +156,6 @@ export function ModelEvidenceFields({ settings: s, onChange, section }: Props) {
     return (
       <div className="dm-model-fields">
         <section className="dm-model-panel">
-          <p className="dm-model-kicker">VERIFIED BUYING GROUP</p>
           <h2>Credit the roles behind a decision</h2>
           <p className="dm-model-note">
             Distinct verified roles count once. Consent and recent engagement

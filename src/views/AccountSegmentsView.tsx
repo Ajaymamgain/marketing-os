@@ -41,7 +41,7 @@ export function AccountSegmentsView(){
   const names=Object.fromEntries((portfolio?.definitions||config?.settings.definitions||[]).map(d=>[d.id,d.name]));
   async function save(){if(!config)return;setSaving(true);setError('');setNotice('');try{const data=await saveSegmentConfiguration(config);setConfig({...data,can_edit:owner});setNotice(sources?.api_enabled===false?'Definitions saved. Classification will refresh when automatic decisions resume.':'Definitions saved. Automatic evaluation will refresh matching accounts.');setRefresh(v=>v+1);}catch(cause){setError(cause instanceof Error?cause.message:'Definitions could not save');}finally{setSaving(false);}}
   return <div className="dm-connections dm-segments">
-    <div className="connections-heading"><div><p className="dm-eyebrow">Demand intelligence</p><h1>Segments</h1><p>Organize accounts and marketing assets using recorded evidence.</p></div><button className="connection-button" disabled={loading||saving} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={15}/>Refresh</button></div>
+    <div className="connections-heading"><div><h1>Segments</h1><p>Organize accounts and marketing assets using recorded evidence.</p></div><button className="connection-button" disabled={loading||saving} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={15}/>Refresh</button></div>
     <ApiDecisionsControl/>
     {sourceError&&<p className="connections-message" role="status">{sourceError}</p>}
     {sources&&<aside className="segment-source-status" aria-label="Marketo data status">

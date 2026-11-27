@@ -29,7 +29,6 @@ export function ModelDialog({
     >
       <div className="dm-model-dialog-head">
         <div>
-          <p className="dm-model-kicker">SCORING STUDIO</p>
           <h2 id="model-dialog-title">{title}</h2>
         </div>
         <button
@@ -115,7 +114,6 @@ export function ActivityRuleBuilder({
     <section className="dm-model-panel">
       <div className="dm-model-section-head">
         <div>
-          <p className="dm-model-kicker">EVENT MAPPING</p>
           <h2>Score the activity that matters</h2>
           <p className="dm-model-note">
             A specific rule replaces base points for a matching event. First

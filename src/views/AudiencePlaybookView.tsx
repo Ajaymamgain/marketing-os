@@ -25,6 +25,7 @@ interface Props { accounts: AccountDemandUnit[]; loading?: boolean }
 
 export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = false }) => {
   const [selectedKey, setSelectedKey] = useState(() => sessionStorage.getItem('dm-playbook-demand-unit') || accounts[0]?.id || '');
+  const [accountQuery, setAccountQuery] = useState('');
   const [listId, setListId] = useState('');
   const [playCode, setPlayCode] = useState('*');
   const [lists, setLists] = useState<Array<{ id: number; name: string }>>([]);
@@ -256,6 +257,21 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
   const friendly = (value: string) => value.replaceAll('_', ' ');
   const date = (value?: string | null) => value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Not recorded';
 
+  const filteredAccounts = accountQuery.trim()
+    ? accounts.filter((account) =>
+        [account.accountName, account.domain, account.solutionTarget].some((v) =>
+          v?.toLowerCase().includes(accountQuery.trim().toLowerCase())
+        )
+      )
+    : accounts;
+  const selectorAccounts =
+    selectedKey && !filteredAccounts.some((a) => a.id === selectedKey)
+      ? [
+          ...accounts.filter((a) => a.id === selectedKey),
+          ...filteredAccounts,
+        ]
+      : filteredAccounts;
+
   return <div className="dm-playbooks">
     <div className="dm-page-head">
       <div><h1>Playbooks</h1><p>Review the next action, connect its destination, and track what the provider confirms.</p></div>
@@ -270,9 +286,32 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       </div>
     </div>
     <PlaybookSkillPanel refreshKey={refreshVersion} onApproved={() => setRefreshVersion(value => value + 1)} />
-    <div className="dm-status-strip"><span><span className="dm-dot" style={{background: plan?.mode === 'local' && plan.can_apply ? '#3c8b77' : '#9a6b16'}}/> {delivery}</span><span>Refreshes every 15 seconds{checkedAt ? ` · Checked ${checkedAt}` : ''}</span></div>
+    <div className="dm-status-strip">
+      <span className={plan?.mode === 'local' && plan.can_apply ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</span>
+      <span>Refreshes every 15 seconds{checkedAt ? ` · Checked ${checkedAt}` : ''}</span>
+    </div>
     <section className="dm-panel dm-selector">
-      <label>Account & demand need<select value={selectedKey} onChange={(event) => { setSelectedKey(event.target.value); setPlan(null); setConfig(null); setListId(''); setResult(null); }}><option value="">Select a demand unit</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.accountName} · {account.solutionTarget}</option>)}</select></label>
+      <label className="max-w-[260px]">
+        Filter demand units
+        <input
+          type="search"
+          className="pb-list-input"
+          placeholder={`Search ${accounts.length} demand units…`}
+          value={accountQuery}
+          onChange={(event) => setAccountQuery(event.target.value)}
+        />
+      </label>
+      <label>
+        Account &amp; demand need ({filteredAccounts.length} of {accounts.length})
+        <select value={selectedKey} onChange={(event) => { setSelectedKey(event.target.value); setPlan(null); setConfig(null); setListId(''); setResult(null); }}>
+          <option value="">Select a demand unit</option>
+          {selectorAccounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.accountName} · {account.solutionTarget}
+            </option>
+          ))}
+        </select>
+      </label>
       <button className="dm-button dm-button-secondary" disabled={busy !== null || previewLoading || configLoading} onClick={() => setRefreshVersion((value) => value + 1)}><RefreshCw size={16} className={previewLoading ? 'animate-spin' : ''}/> Refresh</button>
     </section>
     {error && <div role="alert" className="dm-notice dm-notice-warning">{error}</div>}
@@ -290,8 +329,11 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
         </section>
         <section className="dm-panel">
           <div className="dm-section-heading"><h2>Why this decision?</h2><span className="dm-badge">Score / 100</span></div>
-          <div className="dm-score-bars">{(['fit','intent','coverage'] as const).map((metric) => <div key={metric}><div><span>{metric}</span><strong>{plan.recommendation.score[metric].toFixed(1)}</strong></div><meter min={0} max={100} value={plan.recommendation.score[metric]} aria-label={`${metric} score`}/></div>)}</div>
-          <div className="dm-total"><span>Composite score</span><strong>{plan.recommendation.score.composite.toFixed(1)}</strong></div>
+          <div className="dm-score-bars">{(['fit','intent','coverage'] as const).map((metric) => {
+            const val = Math.max(0, Math.min(100, plan.recommendation.score[metric] || 0));
+            return <div key={metric}><div><span className="capitalize">{metric}</span><strong className="tabular-nums">{val.toFixed(1)}</strong></div><div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#e2e8f0]" role="progressbar" aria-label={`${metric} score`} aria-valuenow={Math.round(val)} aria-valuemin={0} aria-valuemax={100}><div className="h-full rounded-full bg-[#1d4ed8]" style={{ width: `${val}%` }} /></div></div>;
+          })}</div>
+          <div className="dm-total"><span>Composite score</span><strong className="tabular-nums">{plan.recommendation.score.composite.toFixed(1)}</strong></div>
           <ul className="dm-evidence">{plan.evidence.map((item,index) => <li key={index}>{item}</li>)}</ul>
           <p className="dm-footnote">Scores are computed from recorded evidence. The next action is selected within coverage and consent rules.</p>
         </section>
@@ -310,8 +352,8 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       <div className="dm-playbook-grid">
         <section className="dm-panel"><div className="dm-section-heading"><h2>Data behind the playbook</h2><span className="dm-badge">{trace?.sample_account ? 'Sample account' : 'Workspace records'}</span></div>
           <p className="dm-muted">Marketo activities become signals after identity and need mapping. Ad exports provide campaign reporting; they do not identify an individual buyer.</p>
-          <div className="dm-source-tags">{trace?.sources.map((source) => <span key={source.name}>{source.name}<strong>{source.count.toLocaleString()}</strong></span>)}</div>
-          <ol className="dm-timeline">{trace?.recent_signals.map((signal,index) => <li key={`${signal.at}-${index}`}><span className="dm-timeline-dot"/><div><strong>{friendly(signal.type)}</strong><span>{signal.source} · {date(signal.at)}</span></div></li>)}</ol>
+          <div className="dm-source-tags">{trace?.sources.map((source) => <span key={source.name}>{source.name}<strong className="tabular-nums">{source.count.toLocaleString()}</strong></span>)}</div>
+          <ol className="dm-timeline">{trace?.recent_signals.map((signal,index) => <li key={`${signal.at}-${index}`}><div><strong>{friendly(signal.type)}</strong><span className="tabular-nums">{signal.source} · {date(signal.at)}</span></div></li>)}</ol>
           {!trace?.recent_signals.length && <p className="dm-empty">No recorded signals for this account and need.</p>}
           <a href="#simulator" className="dm-text-link">Inspect the supplied CSV exports <ArrowRight size={14}/></a>
         </section>
@@ -362,9 +404,9 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
             <p className="dm-muted">Enter a dedicated Marketo static list for this play. The membership skill verifies the list and reconciles approved additions and removals.</p>
           </div>
         </div>
-        <div className="dm-playbook-grid" style={{ marginBottom: '16px' }}>
-          <div className="dm-selector" style={{ margin: 0, flexDirection: 'column', alignItems: 'stretch' }}>
-            <label style={{ width: '100%' }}>Playbook scope
+        <div className="dm-playbook-grid mb-4">
+          <div className="dm-selector m-0 flex-col items-stretch">
+            <label className="w-full">Playbook scope
               <select value={playCode} disabled={busy !== null} onChange={(event) => { setPlayCode(event.target.value); setConfig(null); setListId(''); }}>
                 <option value="*">General marketing audience (all eligible plays)</option>
                 {plan.playbook_library?.map((recipe) => (
@@ -374,22 +416,22 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
                 ))}
               </select>
             </label>
-            <p className="dm-footnote" style={{ marginTop: '4px' }}>Targeting: <strong>{plan.need_key.replace('_', ' ')}</strong> · Stage: <strong>{plan.stage}</strong></p>
+            <p className="dm-footnote mt-1">Targeting: <strong>{plan.need_key.replace('_', ' ')}</strong> · Stage: <strong>{plan.stage}</strong></p>
           </div>
-          <div className="dm-selector" style={{ margin: 0, flexDirection: 'column', alignItems: 'stretch' }}>
+          <div className="dm-selector m-0 flex-col items-stretch">
             <label>Marketo static list ID
               <input className="pb-list-input" inputMode="numeric" list="pb-list-options" placeholder="e.g. 1001"
                 value={listId} disabled={!canEdit || busy !== null || configLoading || Boolean(config?.marketo_list_id)}
                 onChange={event => {setListId(event.target.value); setResult(null);}}/>
               <datalist id="pb-list-options">{lists.map(list => <option key={list.id} value={list.id}>{list.name}</option>)}</datalist>
             </label>
-            <p className="dm-footnote" style={{ marginTop: '4px' }}>Mapped list: <strong>{currentListId ? `#${currentListId}` : 'None selected'}</strong> · The worker reconciles eligible additions and removals.</p>
+            <p className="dm-footnote mt-1">Mapped list: <strong>{currentListId ? `#${currentListId}` : 'None selected'}</strong> · The worker reconciles eligible additions and removals.</p>
           </div>
         </div>
-        <div className="dm-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', borderTop: '1px solid #e6ebf2', paddingTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-            <CheckCircle2 size={16} />
-            <span>Delivery Status: <strong style={{ color: config?.enabled ? '#16a34a' : '#d97706' }}>{delivery}</strong></span>
+        <div className="dm-actions flex flex-wrap items-center justify-between gap-3 border-t border-[#e2e8f0] pt-4">
+          <div className="flex items-center gap-2 text-[13px] text-[#475569]">
+            <CheckCircle2 size={16} className={config?.enabled ? 'text-[#15803d]' : 'text-[#b45309]'} />
+            <span>Delivery status: <strong className={config?.enabled ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</strong></span>
           </div>
           <div className="pb-mapping-buttons">
             {!mappingSaved && <button className="dm-button dm-button-primary" onClick={() => saveMapping(false)}
@@ -414,7 +456,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
     {!selectedKey && <div className="dm-panel dm-empty">Select a demand unit to inspect its evidence and automation.</div>}
 
     {isModalOpen && <dialog ref={dialogRef} className="dm-playbook-dialog" aria-labelledby="dm-rule-title" onCancel={() => setIsModalOpen(false)}>
-      <div className="dm-section-heading"><div><p className="dm-eyebrow">PLAYBOOK QUALIFICATION</p><h2 id="dm-rule-title">Create an eligibility rule</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close eligibility rule" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>
+      <div className="dm-section-heading"><div><h2 id="dm-rule-title">Create an eligibility rule</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close eligibility rule" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>
       <p className="dm-muted">Use recorded decision evaluations to find qualifying demand units. Saving an action note does not execute it.</p>
       <form onSubmit={handleCreateCustom} className="dm-rule-form">
         {customError && <p role="alert" className="dm-notice dm-notice-warning">{customError}</p>}

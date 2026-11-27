@@ -261,9 +261,6 @@ export function ScoringRulesStudioView({
     <div className="dm-scoring-studio">
       <header className="dm-model-page-head">
         <div>
-          <p className="dm-model-kicker">
-            DEMAND INTELLIGENCE / SCORING STUDIO
-          </p>
           <h1>Scoring models</h1>
           <p>
             Define who fits, what shows intent, and which buying roles matter.
@@ -297,7 +294,6 @@ export function ScoringRulesStudioView({
         </p>
       )}
       <div className="dm-model-active-strip">
-        <span className="dm-model-live-dot" />
         <span>
           <strong>Active workspace policy</strong>{" "}
           {active?.name || "Default demand scoring"}{" "}
@@ -368,8 +364,8 @@ export function ScoringRulesStudioView({
             <div>
               <p className="dm-model-kicker">
                 {selected === "workspace"
-                  ? "WORKSPACE POLICY COPY"
-                  : `MODEL / REVISION ${model?.revision || 0}`}
+                  ? "Workspace policy copy"
+                  : `Model · Revision ${model?.revision || 0}`}
               </p>
               <h2>{name || "Untitled model"}</h2>
               <p>
@@ -474,7 +470,6 @@ export function ScoringRulesStudioView({
               {tab === "mix" && (
                 <div className="dm-model-fields">
                   <section className="dm-model-panel">
-                    <p className="dm-model-kicker">MODEL IDENTITY</p>
                     <h2>Give this score a purpose</h2>
                     <label>
                       Model name
@@ -508,7 +503,6 @@ export function ScoringRulesStudioView({
                     </div>
                   </section>
                   <section className="dm-model-panel">
-                    <p className="dm-model-kicker">COMPOSITE SCORE</p>
                     <h2>Choose how the dimensions combine</h2>
                     <div className="dm-model-presets">
                       {SCORE_OPTIONS.map((option) => (
@@ -615,7 +609,6 @@ export function ScoringRulesStudioView({
                     }
                   />
                   <section className="dm-model-panel">
-                    <p className="dm-model-kicker">BASE EVENT POINTS</p>
                     <h2>The fallback when no specific rule matches</h2>
                     <p className="dm-model-note">
                       Generic events use these points and half-lives. The values
@@ -713,7 +706,6 @@ export function ScoringRulesStudioView({
               {tab === "preview" && (
                 <div className="dm-model-stack">
                   <section className="dm-model-panel">
-                    <p className="dm-model-kicker">READ-ONLY MODEL TEST</p>
                     <h2>See what this model would do</h2>
                     <p className="dm-model-note">
                       Uses this draft's complete rules and recorded evidence. No
