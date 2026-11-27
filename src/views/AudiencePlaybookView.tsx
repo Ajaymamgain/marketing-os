@@ -8,6 +8,7 @@ import {
   AudiencePlaybookPreview,
   MarketoPlaybookAsset,
   MarketoPlaybookAssets,
+  PlaybookRun,
   applyAudiencePlaybook,
   fetchAudiencePlaybookConfig,
   fetchMarketoPlaybookAssets,
@@ -49,6 +50,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
   const [assetError, setAssetError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
+  const [latestRun, setLatestRun] = useState<PlaybookRun | null>(null);
 
   // Custom Noul Playbooks state
   const [customLoadError, setCustomLoadError] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
   useEffect(() => {
     if (loading) return;
     if (!accounts.some((account) => account.id === selectedKey)) {
-      setSelectedKey(accounts[0]?.id || ''); setPlan(null); setConfig(null); setListId(''); setResult(null);
+      setSelectedKey(accounts[0]?.id || ''); setPlan(null); setConfig(null); setListId(''); setResult(null); setLatestRun(null);
     }
   }, [accounts, selectedKey, loading]);
   useEffect(() => { if (selectedKey) sessionStorage.setItem('dm-playbook-demand-unit', selectedKey); }, [selectedKey]);
@@ -254,6 +256,19 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
   const decisionCurrent = plan?.recommendation.jev_applied && plan.recommendation.decision_current;
   const recipes = plan?.playbook_library || [];
   const displayedRecipes = showAllRecipes ? recipes : recipes.filter((recipe) => recipe.selected || ['EVENT_FOLLOW_UP', 'CONTENT_NURTURE', 'PRICING_FOLLOW_UP'].includes(recipe.code));
+  const selectedPlayName = playCode === '*'
+    ? 'General marketing audience (all eligible plays)'
+    : recipes.find((recipe) => recipe.code === playCode)?.name || playCode.replaceAll('_', ' ');
+  const marketoWriteVerified = Boolean(plan?.delivery_connection_ready && plan?.mode === 'local');
+  const activationCapabilityLabel = !plan
+    ? 'Checking capability'
+    : marketoWriteVerified && mappingSaved
+      ? 'Verified write capability · Marketo static list'
+      : marketoWriteVerified
+        ? 'Verified write capability · map a list to activate'
+        : plan.mode !== 'local'
+          ? 'Plan & preview only · dry run'
+          : 'Plan & preview only · write setup required';
   const friendly = (value: string) => value.replaceAll('_', ' ');
   const date = (value?: string | null) => value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Not recorded';
 
@@ -287,11 +302,10 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
           onClick={() => document.getElementById('playbook-runs')?.scrollIntoView({block:'start'})}>Run history <ArrowRight size={16}/></button>
       </div>
     </div>
-    {!canEdit && <div className="dm-notice" role="status"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#64748b]"/><p>Workspace owner permission is required to create eligibility rules, save destination mappings, enable automatic delivery, or apply updates.</p></div>}
-    <PlaybookSkillPanel refreshKey={refreshVersion} onApproved={() => setRefreshVersion(value => value + 1)} />
+    {!canEdit && <div className="dm-notice" role="status"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#64748b]"/><p>Workspace owner permission is required to create eligibility rules, approve Marketo skills and tools, save destination mappings, enable automatic delivery, or apply updates.</p></div>}
     <div className="dm-status-strip">
       <span className={plan?.mode === 'local' && plan.can_apply ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</span>
-      <span>Refreshes every 15 seconds{checkedAt ? ` · Checked ${checkedAt}` : ''}</span>
+      <span>{activationCapabilityLabel} · Refreshes every 15 seconds{checkedAt ? ` · Checked ${checkedAt}` : ''}</span>
     </div>
     <section className="dm-panel dm-selector">
       <label className="max-w-[260px]">
@@ -306,7 +320,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       </label>
       <label>
         Account &amp; demand need ({filteredAccounts.length} of {accounts.length})
-        <select value={selectedKey} onChange={(event) => { setSelectedKey(event.target.value); setPlan(null); setConfig(null); setListId(''); setResult(null); }}>
+        <select value={selectedKey} onChange={(event) => { setSelectedKey(event.target.value); setPlan(null); setConfig(null); setListId(''); setResult(null); setLatestRun(null); }}>
           <option value="">Select a demand unit</option>
           {selectorAccounts.map((account) => (
             <option key={account.id} value={account.id}>
@@ -343,10 +357,10 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       </div>
       <section className="dm-flow" aria-label="Automated playbook lifecycle">
         {[
-          {icon:Database, label:'01 · Evidence received', value:`${trace?.signal_count ?? '—'} signals`, detail:trace?.sample_account ? 'Fictional sample account' : 'Recorded workspace evidence'},
+          {icon:Database, label:'01 · Evidence received', value:`${trace?.signal_count ?? '—'} signals`, detail:trace?.sample_account ? 'Synthetic sample account' : 'Recorded workspace evidence'},
           {icon:Activity, label:'02 · Decision', value:decisionCurrent ? plan.recommendation.campaign.name : 'Awaiting a current decision', detail:`Score ${plan.recommendation.score.composite.toFixed(1)} / 100`},
-          {icon:Sparkles, label:'03 · Skill and destination', value:plan.delivery_transport === 'mcp' ? 'Marketo MCP' : plan.delivery_transport === 'legacy' ? 'Existing Marketo adapter' : 'Connect Marketo MCP', detail:config?.marketo_list_id ? `List #${config.marketo_list_id}` : 'Save a dedicated list'},
-          {icon:ShieldCheck, label:'04 · Reconciliation', value:delivery, detail:'Consent and eligibility checked before each update'},
+          {icon:Sparkles, label:'03 · Skill & Marketo list', value:plan.delivery_transport === 'mcp' ? 'Adobe MCP skill' : plan.delivery_transport === 'legacy' ? 'Existing Marketo adapter' : 'Approve Adobe MCP skill', detail:config?.marketo_list_id ? `List #${config.marketo_list_id}` : 'Save a dedicated static list'},
+          {icon:ShieldCheck, label:'04 · Readback & reconciliation', value:latestRun ? `${latestRun.applied_count} confirmed` : delivery, detail:latestRun ? `Last readback ${date(latestRun.completed_at)}` : 'Consent and eligibility checked before each update'},
         ].map((item) => <div key={item.label} className="dm-flow-step"><item.icon size={19}/><span>{item.label}</span><strong>{item.value}</strong><small>{item.detail}</small></div>)}
       </section>
 
@@ -369,22 +383,72 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
         </section>
       </div>
       <section className="dm-panel">
-        <div className="dm-section-heading"><h2>Marketing operations playbooks</h2><span className="dm-badge">Automatically evaluated</span></div>
-        <p className="dm-muted">The strategy is selected automatically from evidence. Map dedicated destinations once. When the strategy changes, the worker reconciles eligible membership and removes contacts from plays that no longer apply. Sales, coverage, and customer plays create operational recommendations; they do not automatically send nurture.</p>
-        <div className="dm-recipe-grid">{displayedRecipes.map((recipe) => <article key={recipe.code} className={recipe.selected ? 'dm-recipe dm-recipe-selected' : 'dm-recipe'}>
-          <div className="dm-section-heading"><span className="dm-badge">{recipe.selected ? 'Selected by current decision' : 'Available strategy'}</span><span className="dm-badge">{recipe.mapping.enabled ? 'Mapping enabled' : recipe.mapping.marketo_list_id ? 'Mapping paused' : 'Not mapped'}</span></div>
-          <h3>{recipe.name}</h3><p>{recipe.detail}</p>
-
-        </article>)}</div><div className="dm-playbook-actions dm-library-actions"><button className="dm-button dm-button-secondary" aria-expanded={showAllRecipes} onClick={() => setShowAllRecipes(!showAllRecipes)}>{showAllRecipes ? 'Show key plays' : `View all ${recipes.length} strategies`}</button><button className="dm-button dm-button-secondary" onClick={() => {document.getElementById('dm-automation-setup')?.scrollIntoView({behavior:'smooth',block:'start'});}}>Manage automated destinations <ArrowRight size={15}/></button></div>
+        <div className="dm-section-heading">
+          <div>
+            <h2>Marketing operations playbooks</h2>
+            <p className="dm-muted">
+              Playbooks with a verified Marketo static-list write capability reconcile approved list
+              membership; unmapped, dry-run, sales, coverage, and customer plays remain plan and
+              preview only.
+            </p>
+          </div>
+          <span className="dm-badge">
+            {marketoWriteVerified ? 'Marketo static-list writes verified' : 'Plan & preview mode'}
+          </span>
+        </div>
+        <div className="dm-recipe-grid">{displayedRecipes.map((recipe) => {
+          const hasMappedList = Boolean(recipe.mapping.marketo_list_id);
+          const hasVerifiedWrite = marketoWriteVerified && hasMappedList;
+          const capabilityLabel = hasVerifiedWrite
+            ? `Verified write · List #${recipe.mapping.marketo_list_id}`
+            : hasMappedList
+              ? `Plan & preview · write blocked (List #${recipe.mapping.marketo_list_id})`
+              : 'Plan & preview only';
+          return <article key={recipe.code} className={recipe.selected ? 'dm-recipe dm-recipe-selected' : 'dm-recipe'}>
+            <div className="dm-section-heading">
+              <span className="dm-badge">{recipe.selected ? 'Selected by current decision' : 'Available strategy'}</span>
+              <span className={hasVerifiedWrite ? 'dm-badge dm-badge-ready' : 'dm-badge'}>{capabilityLabel}</span>
+            </div>
+            <h3>{recipe.name}</h3>
+            <p>{recipe.detail}</p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#f1f5f9] pt-2.5 text-xs">
+              <span className="text-[#64748b]">
+                {recipe.mapping.enabled ? 'Automatic delivery on' : hasMappedList ? 'Mapping paused' : 'Not mapped to a static list'}
+              </span>
+              <button
+                type="button"
+                className="font-semibold text-[#1d4ed8] hover:underline"
+                onClick={() => {
+                  setPlayCode(recipe.code);
+                  setConfig(null);
+                  setListId('');
+                  document.getElementById('dm-automation-setup')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+                }}
+              >
+                Open activation step →
+              </button>
+            </div>
+          </article>;
+        })}</div>
+        <div className="dm-playbook-actions dm-library-actions">
+          <button className="dm-button dm-button-secondary" aria-expanded={showAllRecipes} onClick={() => setShowAllRecipes(!showAllRecipes)}>{showAllRecipes ? 'Show key plays' : `View all ${recipes.length} strategies`}</button>
+          <button className="dm-button dm-button-secondary" onClick={() => {document.getElementById('dm-automation-setup')?.scrollIntoView({behavior:'smooth',block:'start'});}}>Go to Marketo static-list activation <ArrowRight size={15}/></button>
+        </div>
       </section>
 
       <section className="dm-panel">
-        <div className="dm-section-heading"><div><h2>Custom eligibility rules</h2><p className="dm-muted">Match demand units using a current progression evaluation, lane, fit, intent, and verified coverage.</p></div><span className="dm-badge">Qualification only</span></div>
-        <p className="dm-muted">Action notes describe the intended workflow. Custom rules do not send campaigns or execute provider actions; use the mapped built-in strategies for audience delivery.</p>
+        <div className="dm-section-heading">
+          <div>
+            <h2>Custom eligibility rules</h2>
+            <p className="dm-muted">Match demand units using a current progression evaluation, lane, fit, intent, and verified coverage.</p>
+          </div>
+          <span className="dm-badge">Plan &amp; preview only · no provider writes</span>
+        </div>
+        <p className="dm-muted">Action notes describe the intended workflow. Custom rules only plan and preview qualification; they never execute provider writes.</p>
         {customLoadError && <p role="alert" className="dm-notice dm-notice-warning">{customLoadError} <button className="dm-button dm-button-secondary" onClick={loadCustomPlaybooks}>Retry rules</button></p>}
         {!customLoadError && !customPlaybooks.length && <p className="dm-empty">No custom rules saved. Create a rule to inspect which demand units qualify.</p>}
         <div className="dm-recipe-grid">{customPlaybooks.map((cpb) => <article key={cpb.id} className="dm-recipe dm-custom-rule">
-          <div className="dm-section-heading"><span className="dm-badge">{cpb.is_active ? 'Enabled rule' : 'Paused rule'}</span><span className="dm-badge">{friendly(cpb.lane)} · {cpb.sla_hours}h target</span></div>
+          <div className="dm-section-heading"><span className="dm-badge">{cpb.is_active ? 'Enabled rule' : 'Paused rule'}</span><span className="dm-badge">Plan &amp; preview · {friendly(cpb.lane)}</span></div>
           <h3>{cpb.name}</h3><p>{cpb.description}</p>
           <dl className="dm-rule-facts"><div><dt>Progress probability</dt><dd>{cpb.noul_operator} {Math.round(cpb.noul_threshold * 100)}%</dd></div><div><dt>Minimum fit / intent</dt><dd>{cpb.min_fit} / {cpb.min_intent}</dd></div><div><dt>Action note</dt><dd>{cpb.action}</dd></div></dl>
           <div className="dm-playbook-actions"><button className="dm-button dm-button-secondary" aria-expanded={expandedCustomId === cpb.id} onClick={() => setExpandedCustomId(expandedCustomId === cpb.id ? null : cpb.id)}>{expandedCustomId === cpb.id ? <ChevronUp size={15}/> : <ChevronDown size={15}/>} {cpb.matched_units_count ?? 0} qualifying demand units</button>
@@ -400,26 +464,47 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
           <article className="dm-recipe"><h3>3. Smart Campaign · what happens</h3><p>Configure and activate an approved campaign in Marketo using Added to List or a scheduled Member of List filter. Its flow can send nurture, update program status, or alert an owner. Set qualification rules to prevent repeated sends.</p></article>
         </div><p className="dm-footnote">Program membership is separate from list membership. Campaign flows and Smart List rules must be configured in Marketo. Direct campaign execution and program enrollment are not implied by the list worker.</p>
       </details>
-      <section id="dm-automation-setup" className="dm-panel dm-setup">
+
+      {/* Unified Marketo Static-List Activation Workflow (Skill + Mapped List + Evidence + Blockers + Latest Readback) */}
+      <section id="dm-automation-setup" className="dm-panel dm-setup space-y-5" aria-labelledby="pb-marketo-activation-title">
         <div className="dm-section-heading">
           <div>
-            <h2>Destination mapping</h2>
-            <p className="dm-muted">Enter a dedicated Marketo static list for this play. The membership skill verifies the list and reconciles approved additions and removals.</p>
+            <h2 id="pb-marketo-activation-title">Marketo static-list activation</h2>
+            <p className="dm-muted">
+              Verify the Adobe MCP skill and tools, map the selected play’s dedicated static list,
+              inspect available evidence and blocked reasons, and confirm provider readback in one
+              workflow.
+            </p>
           </div>
+          <span className={marketoWriteVerified && mappingSaved ? 'dm-badge dm-badge-ready' : 'dm-badge'}>
+            {activationCapabilityLabel}
+          </span>
         </div>
-        <div className="dm-playbook-grid mb-4">
+
+        {/* Step A: Executing skill & verified Adobe MCP connection */}
+        <PlaybookSkillPanel
+          embedded
+          refreshKey={refreshVersion}
+          onApproved={() => setRefreshVersion(value => value + 1)}
+          onNavigateTab={onNavigateTab}
+        />
+
+        {/* Step B: Selected play & mapped static list */}
+        <div className="dm-playbook-grid">
           <div className="dm-selector m-0 flex-col items-stretch">
             <label className="w-full">Playbook scope
               <select value={playCode} disabled={busy !== null} onChange={(event) => { setPlayCode(event.target.value); setConfig(null); setListId(''); }}>
                 <option value="*">General marketing audience (all eligible plays)</option>
                 {plan.playbook_library?.map((recipe) => (
                   <option key={recipe.code} value={recipe.code}>
-                    {recipe.name} ({recipe.mapping.enabled ? 'Active' : 'Standby'})
+                    {recipe.name} ({recipe.mapping.enabled ? 'Active' : recipe.mapping.marketo_list_id ? 'Paused' : 'Unmapped'})
                   </option>
                 ))}
               </select>
             </label>
-            <p className="dm-footnote mt-1">Targeting: <strong>{plan.need_key.replace('_', ' ')}</strong> · Stage: <strong>{plan.stage}</strong></p>
+            <p className="dm-footnote mt-1">
+              Selected play: <strong>{selectedPlayName}</strong> · Need: <strong>{plan.need_key.replace('_', ' ')}</strong> · Stage: <strong>{plan.stage}</strong>
+            </p>
           </div>
           <div className="dm-selector m-0 flex-col items-stretch">
             <label>Marketo static list ID
@@ -428,13 +513,104 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
                 onChange={event => {setListId(event.target.value); setResult(null);}}/>
               <datalist id="pb-list-options">{lists.map(list => <option key={list.id} value={list.id}>{list.name}</option>)}</datalist>
             </label>
-            <p className="dm-footnote mt-1">Mapped list: <strong>{currentListId ? `#${currentListId}` : 'None selected'}</strong> · The worker reconciles eligible additions and removals.</p>
+            <p className="dm-footnote mt-1">
+              Mapped list: <strong>{currentListId ? `#${currentListId}` : 'None mapped'}</strong> · Pending action: <strong className="capitalize">{plan.action}</strong>
+            </p>
           </div>
         </div>
+
+        {/* Step C: Available evidence & latest readback summary */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-[#e2e8f0] bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-[#0f172a]">Available evidence</h3>
+              <span className="text-xs font-medium text-[#64748b]">
+                {trace?.sample_account ? 'Synthetic sample account' : `${trace?.signal_count ?? 0} recorded signals`}
+              </span>
+            </div>
+            <dl className="mt-3 grid grid-cols-3 gap-2 border-y border-[#f1f5f9] py-2.5 text-xs tabular-nums">
+              <div>
+                <dt className="text-[#64748b]">Known contacts</dt>
+                <dd className="mt-0.5 text-sm font-semibold text-[#0f172a]">{plan.candidate_contacts}</dd>
+              </div>
+              <div>
+                <dt className="text-[#64748b]">{plan.action === 'remove' ? 'Removal candidates' : 'Eligible contacts'}</dt>
+                <dd className="mt-0.5 text-sm font-semibold text-[#0f172a]">{plan.eligible_contacts}</dd>
+              </div>
+              <div>
+                <dt className="text-[#64748b]">Consent exclusions</dt>
+                <dd className="mt-0.5 text-sm font-semibold text-[#0f172a]">{plan.excluded_for_consent}</dd>
+              </div>
+            </dl>
+            {plan.evidence.length > 0 ? (
+              <ul className="mt-2.5 space-y-1 text-xs text-[#475569]">
+                {plan.evidence.slice(0, 4).map((item, idx) => (
+                  <li key={idx}>• {item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2.5 text-xs text-[#64748b]">No scored evidence summary recorded for this play yet.</p>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-[#e2e8f0] bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-[#0f172a]">Latest readback</h3>
+              <a href="#playbook-runs" className="text-xs font-semibold text-[#1d4ed8] hover:underline">
+                Full history ↓
+              </a>
+            </div>
+            {latestRun ? (
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs tabular-nums">
+                <div>
+                  <dt className="text-[#64748b]">Recorded at</dt>
+                  <dd className="mt-0.5 font-medium text-[#0f172a]">{date(latestRun.completed_at)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[#64748b]">Destination &amp; transport</dt>
+                  <dd className="mt-0.5 font-medium text-[#0f172a]">
+                    List #{latestRun.marketo_list_id} · {latestRun.transport === 'mcp' ? `Adobe MCP (${latestRun.skill_digest?.slice(7, 19) || 'skill recorded'})` : 'Existing adapter'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[#64748b]">Provider status</dt>
+                  <dd className="mt-0.5 font-semibold capitalize text-[#0f172a]">
+                    {latestRun.status?.replaceAll('_', ' ') || 'Recorded'} ({latestRun.action})
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[#64748b]">Confirmed / Unverified</dt>
+                  <dd className="mt-0.5 font-medium text-[#0f172a]">
+                    {latestRun.applied_count} confirmed ({latestRun.added_count ?? '—'} added · {latestRun.removed_count ?? '—'} removed) · {Math.max(latestRun.requested_count - latestRun.applied_count, latestRun.skipped_count)} unverified
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-3 text-xs leading-relaxed text-[#64748b]">
+                No provider readback recorded for this demand unit yet. A plan preview or
+                recommendation is not a confirmed Marketo write.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Step D: Blocked reasons */}
+        {plan.blockers.length > 0 && (
+          <div role="status" className="dm-notice dm-notice-warning">
+            <strong>Blocked reasons ({plan.blockers.length})</strong>
+            <ul>
+              {plan.blockers.map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Step E: Owner-only activation controls */}
         <div className="dm-actions flex flex-wrap items-center justify-between gap-3 border-t border-[#e2e8f0] pt-4">
           <div className="flex items-center gap-2 text-[13px] text-[#475569]">
-            <CheckCircle2 size={16} className={config?.enabled ? 'text-[#15803d]' : 'text-[#b45309]'} />
-            <span>Delivery status: <strong className={config?.enabled ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</strong></span>
+            <CheckCircle2 size={16} className={config?.enabled && !plan.blockers.length ? 'text-[#15803d]' : 'text-[#b45309]'} />
+            <span>Delivery status: <strong className={config?.enabled && !plan.blockers.length ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</strong></span>
           </div>
           <div className="pb-mapping-buttons">
             {!mappingSaved && <button className="dm-button dm-button-primary" onClick={() => saveMapping(false)}
@@ -452,11 +628,32 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
           </div>
         </div>
       </section>
-      <PlaybookRunHistory demandUnitKey={selectedKey} refreshKey={refreshVersion} />
-      <details className="dm-panel dm-setup"><summary>Provider destinations <span>Provider availability</span></summary><div className="dm-provider-list">{plan.providers.map((provider) => <div key={provider.id}><div><strong>{provider.name}</strong><p>{provider.detail}</p></div><span className={provider.status === 'ready' ? 'dm-badge dm-badge-ready' : 'dm-badge'}>{provider.status}</span></div>)}</div></details>
+
+      <PlaybookRunHistory demandUnitKey={selectedKey} refreshKey={refreshVersion} onLatestRun={setLatestRun} />
+      <details className="dm-panel dm-setup">
+        <summary>Provider destinations <span>Verified write vs plan &amp; preview availability</span></summary>
+        <div className="dm-provider-list">{plan.providers.map((provider) => {
+          const capLabel = provider.status === 'ready'
+            ? 'Verified write capability'
+            : provider.status === 'blocked'
+              ? 'Write blocked'
+              : 'Plan & preview only';
+          return <div key={provider.id}>
+            <div><strong>{provider.name}</strong><p>{provider.detail}</p></div>
+            <span className={provider.status === 'ready' ? 'dm-badge dm-badge-ready' : 'dm-badge'}>{capLabel}</span>
+          </div>;
+        })}</div>
+      </details>
     </>}
+    {!plan && (
+      <PlaybookSkillPanel
+        refreshKey={refreshVersion}
+        onApproved={() => setRefreshVersion(value => value + 1)}
+        onNavigateTab={onNavigateTab}
+      />
+    )}
     <details className="dm-panel dm-setup"><summary>Browse Marketo assets <span>{assets ? `${assets.counts.programs} programs · ${assets.counts.smart_campaigns} campaigns · ${assets.counts.smart_lists} smart lists` : assetError ? 'Catalog unavailable' : 'Loading catalog…'}</span></summary>{assetError ? <p role="alert" className="dm-muted">{assetError}</p> : <MarketoAssetCatalog assets={assets} query={assetQuery} onQuery={setAssetQuery}/>}</details>
-    {!selectedKey && <div className="dm-panel dm-empty">Select a demand unit to inspect its evidence and automation.</div>}
+    {!selectedKey && <div className="dm-panel dm-empty">Select a demand unit to inspect its evidence and Marketo static-list activation.</div>}
 
     {isModalOpen && <dialog ref={dialogRef} className="dm-playbook-dialog" aria-labelledby="dm-rule-title" onCancel={() => setIsModalOpen(false)}>
       <div className="dm-section-heading"><div><h2 id="dm-rule-title">Create an eligibility rule</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close eligibility rule" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>

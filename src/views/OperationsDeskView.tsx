@@ -19,7 +19,7 @@ export const OperationsDeskView: React.FC<OperationsDeskViewProps> = ({ onNaviga
         <div>
           <h1>Operations Desk</h1>
           <p>
-            Run read-only operational investigations, inspect timestamped check evidence, and review
+            Triage recorded operational cases, inspect timestamped check evidence, and review
             proposed changes before anything touches a connected destination.
           </p>
         </div>
@@ -64,7 +64,9 @@ export const OperationsDeskView: React.FC<OperationsDeskViewProps> = ({ onNaviga
         </div>
       </header>
 
-      <ApiDecisionsControl />
+      <div id="decision-service-settings" tabIndex={-1} className="scroll-mt-4 outline-none">
+        <ApiDecisionsControl />
+      </div>
 
       <OperationsJobsPanel light onNavigateTab={onNavigateTab} />
     </div>

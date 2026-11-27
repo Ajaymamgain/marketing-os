@@ -77,8 +77,8 @@ type OperationsState = {
   policy: { enabled: boolean; workflows: string[]; revision: number };
 };
 
-type DeskTab = 'runs' | 'triggers' | 'instructions';
-type StatusFilter = 'all' | 'review' | 'attention' | 'active' | 'succeeded';
+type DeskTab = 'inbox' | 'workflows' | 'triggers' | 'instructions';
+type StatusFilter = 'all' | 'draft' | 'review' | 'attention' | 'active' | 'succeeded';
 
 const WORKFLOW_NAMES: Record<string, string> = {
   'connector-review': 'MCP connection review',
@@ -179,6 +179,7 @@ function formatStamp(value?: string | null): string {
 function formatStatusLabel(status?: string | null): string {
   if (!status) return 'Unknown';
   const normalized = status.toLowerCase();
+  if (normalized === 'draft') return 'Draft';
   if (normalized === 'awaiting_review') return 'Awaiting review';
   if (normalized === 'succeeded' || normalized === 'completed') return 'Checks finished';
   if (normalized === 'failed') return 'Failed';
@@ -233,7 +234,7 @@ export function OperationsJobsPanel({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const [tab, setTab] = useState<DeskTab>('runs');
+  const [tab, setTab] = useState<DeskTab>('inbox');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [workflowFilter, setWorkflowFilter] = useState<string>('all');
   const [runSearch, setRunSearch] = useState('');
@@ -248,6 +249,7 @@ export function OperationsJobsPanel({
   const [draftDirty, setDraftDirty] = useState(false);
 
   const inspectorRef = useRef<HTMLDivElement | null>(null);
+  const newCaseRef = useRef<HTMLElement | null>(null);
 
   async function refresh() {
     const next = await read<OperationsState>('/v1/operations/status');
@@ -380,6 +382,7 @@ export function OperationsJobsPanel({
   const needsResearch = ['company-enrichment', 'people-enrichment'].includes(workflow);
   const activeSkill = SKILLS.find((item) => item.id === workflow) || SKILLS[0];
 
+  const draftCount = useMemo(() => jobs.filter((j) => j.status === 'draft').length, [jobs]);
   const reviewCount = useMemo(() => jobs.filter((j) => hasPendingProposal(j)).length, [jobs]);
   const attentionCount = useMemo(
     () => jobs.filter((j) => ['failed', 'blocked'].includes(j.status)).length,
@@ -394,6 +397,7 @@ export function OperationsJobsPanel({
     const q = runSearch.trim().toLowerCase();
     return jobs.filter((job) => {
       if (workflowFilter !== 'all' && job.workflow !== workflowFilter) return false;
+      if (statusFilter === 'draft' && job.status !== 'draft') return false;
       if (statusFilter === 'review' && !hasPendingProposal(job)) return false;
       if (statusFilter === 'attention' && !['failed', 'blocked'].includes(job.status)) return false;
       if (statusFilter === 'active' && !['queued', 'running'].includes(job.status)) return false;
@@ -412,16 +416,18 @@ export function OperationsJobsPanel({
 
   const displayedJobs = showAllRuns ? filteredJobs : filteredJobs.slice(0, 10);
 
-  async function act(fn: () => Promise<unknown>, successNote?: string) {
+  async function act<T>(fn: () => Promise<T>, successNote?: string): Promise<T | undefined> {
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      await fn();
+      const value = await fn();
       await refresh();
       if (successNote) setNotice(successNote);
+      return value;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Operations Desk request failed.');
+      return undefined;
     } finally {
       setBusy(false);
     }
@@ -431,19 +437,61 @@ export function OperationsJobsPanel({
     event.preventDefault();
     if (!ready || !owner || busy || !visibleTarget || (needsResearch && !state?.research_configured))
       return;
-    await act(async () => {
-      const created = await mutate('/v1/operations/jobs', {
-        workflow,
-        target: visibleTarget,
-        request_key: crypto.randomUUID(),
-      });
-      if (created?.job?.id) {
-        setSelectedJobId(created.job.id);
-      } else if (created?.id) {
-        setSelectedJobId(created.id);
-      }
-      setTab('runs');
-    }, `Queued ${WORKFLOW_NAMES[workflow] || workflow} for ${visibleTarget}.`);
+    const created = await act(
+      () =>
+        mutate('/v1/operations/jobs', {
+          workflow,
+          target: visibleTarget,
+          request_key: crypto.randomUUID(),
+        }),
+      `Started case: ${WORKFLOW_NAMES[workflow] || workflow} for ${visibleTarget}.`
+    );
+    const createdId = created?.job?.id || created?.id;
+    if (createdId) setSelectedJobId(createdId);
+    if (created) {
+      if (statusFilter !== 'all' && statusFilter !== 'active') setStatusFilter('all');
+      if (workflowFilter !== 'all' && workflowFilter !== workflow) setWorkflowFilter('all');
+      setTab('inbox');
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!owner || busy || !visibleTarget) return;
+    const created = await act(
+      () =>
+        mutate('/v1/operations/jobs', {
+          workflow,
+          target: visibleTarget,
+          request_key: crypto.randomUUID(),
+          draft: true,
+        }),
+      `Saved draft case: ${WORKFLOW_NAMES[workflow] || workflow} for ${visibleTarget} (no model calls).`
+    );
+    const createdId = created?.job?.id || created?.id;
+    if (createdId) setSelectedJobId(createdId);
+    if (created) {
+      if (statusFilter !== 'all' && statusFilter !== 'draft') setStatusFilter('all');
+      if (workflowFilter !== 'all' && workflowFilter !== workflow) setWorkflowFilter('all');
+      setTab('inbox');
+    }
+  };
+
+  const handleStartDraftCase = async (job: Job) => {
+    const draftNeedsResearch = ['company-enrichment', 'people-enrichment'].includes(job.workflow);
+    if (!ready || !owner || busy || (draftNeedsResearch && !state?.research_configured)) return;
+    const started = await act(
+      () =>
+        mutate('/v1/operations/jobs', {
+          action: 'start',
+          case_id: job.id,
+        }),
+      `Started case: ${WORKFLOW_NAMES[job.workflow] || job.workflow} for ${job.target}.`
+    );
+    if (started) {
+      const nextId = started?.job?.id || started?.id || job.id;
+      setSelectedJobId(nextId);
+      if (statusFilter === 'draft') setStatusFilter('all');
+    }
   };
 
   const handleSelectRun = (job: Job) => {
@@ -455,18 +503,104 @@ export function OperationsJobsPanel({
     }
   };
 
+  const focusDecisionSettings = () => {
+    const el = document.getElementById('decision-service-settings');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.querySelector<HTMLElement>('button[role="switch"]')?.focus();
+      return;
+    }
+    if (onNavigateTab) onNavigateTab('AUTOMATION');
+    else window.location.hash = '#automation';
+  };
+
+  const navigateSettings = (targetTab: ActiveNavTab, hash: string) => {
+    if (onNavigateTab) {
+      onNavigateTab(targetTab);
+    } else {
+      window.location.hash = hash;
+    }
+  };
+
   const tabs: Array<{ id: DeskTab; label: string; count?: number }> = [
-    { id: 'runs', label: 'Runs & evidence', count: jobs.length },
+    { id: 'inbox', label: 'Case Inbox', count: jobs.length },
+    { id: 'workflows', label: 'Workflows', count: SKILLS.length },
     { id: 'triggers', label: 'Automatic triggers' },
     { id: 'instructions', label: 'Instructions' },
   ];
 
-  const setupChecks = [
-    { label: 'Operations service configured', value: state?.configured },
-    { label: 'Operations runtime installed', value: state?.installed },
-    { label: 'Operations worker healthy', value: Boolean(state?.enabled && state?.worker_healthy) },
-    { label: 'Public research connected', value: state?.research_configured },
-  ];
+  const decisionServiceOn: boolean | null = !state
+    ? null
+    : state.api_enabled !== undefined
+      ? state.api_enabled
+      : state.state === 'running'
+        ? true
+        : state.state === 'paused'
+          ? false
+          : null;
+
+  const readinessChecks = useMemo(() => {
+    if (!state) return [];
+    const workerReady = Boolean(state.enabled && state.worker_healthy);
+    const workerLabel = workerReady
+      ? 'Online'
+      : !state.enabled
+        ? 'Worker off'
+        : 'Worker offline';
+
+    return [
+      {
+        id: 'decision-service',
+        label: 'Decision service',
+        ready: decisionServiceOn === true,
+        unknown: decisionServiceOn === null,
+        status:
+          decisionServiceOn === true
+            ? 'Enabled'
+            : decisionServiceOn === false
+              ? 'Decision service off'
+              : 'Status unknown',
+        detail:
+          decisionServiceOn === false
+            ? 'Manual runs also require the decision service enabled.'
+            : decisionServiceOn === true
+              ? 'Automatic and manual runs are permitted.'
+              : 'Service status was not reported by the backend.',
+      },
+      {
+        id: 'operations-model',
+        label: 'Operations model',
+        ready: Boolean(state.configured),
+        unknown: false,
+        status: state.configured ? 'Configured' : 'Operations model unconfigured',
+        detail: state.configured
+          ? 'Server-side operations model configuration is present.'
+          : 'Configured on the workspace server; keys are never entered in this screen.',
+      },
+      {
+        id: 'operations-runtime',
+        label: 'Operations runtime',
+        ready: Boolean(state.installed),
+        unknown: false,
+        status: state.installed ? 'Available' : 'Runtime unavailable',
+        detail: state.installed
+          ? 'Predefined workflow runtime is installed.'
+          : 'The operations execution runtime is not available on this host.',
+      },
+      {
+        id: 'operations-worker',
+        label: 'Operations worker',
+        ready: workerReady,
+        unknown: false,
+        status: workerLabel,
+        detail: workerReady
+          ? 'Worker heartbeat is healthy.'
+          : !state.enabled
+            ? 'The background operations worker is turned off.'
+            : 'The operations worker is offline or not reporting healthy.',
+      },
+    ];
+  }, [state, decisionServiceOn]);
 
   const inspectedJob = detail?.job || activeJobSummary;
   const inspectedReport = inspectedJob?.result?.report;
@@ -491,7 +625,7 @@ export function OperationsJobsPanel({
       : ready
         ? 'Ready'
         : paused
-          ? 'Automatic decisions off'
+          ? 'Runs paused'
           : 'Setup required';
 
   const deskStatusTone = loading && !state
@@ -517,9 +651,11 @@ export function OperationsJobsPanel({
           <p className="mt-0.5 text-xs text-[#64748b]">
             {unavailable
               ? 'Last snapshot shown'
-              : state?.policy.enabled
-                ? `${state.policy.workflows.length} automatic triggers on`
-                : 'Manual runs only'}
+              : paused
+                ? 'Manual runs also require the decision service enabled'
+                : state?.policy.enabled
+                  ? `${state.policy.workflows.length} automatic triggers on`
+                  : 'Manual runs only'}
           </p>
         </div>
 
@@ -536,7 +672,7 @@ export function OperationsJobsPanel({
         </div>
 
         <div className="p-4 tabular-nums">
-          <p className="text-xs font-medium text-[#64748b]">Failed or held runs</p>
+          <p className="text-xs font-medium text-[#64748b]">Failed or held cases</p>
           <p
             className={`mt-1 text-xl font-bold ${
               attentionCount > 0 ? 'text-[#b91c1c]' : 'text-[#0f172a]'
@@ -548,7 +684,7 @@ export function OperationsJobsPanel({
         </div>
 
         <div className="p-4 tabular-nums">
-          <p className="text-xs font-medium text-[#64748b]">Recorded runs</p>
+          <p className="text-xs font-medium text-[#64748b]">Recorded cases</p>
           <p className="mt-1 text-xl font-bold text-[#0f172a]">
             {state ? jobs.length.toLocaleString() : '—'}
           </p>
@@ -624,67 +760,103 @@ export function OperationsJobsPanel({
       {state && !ready && (
         <div
           role="status"
-          className="rounded-[10px] border border-[#fde68a] bg-[#fffbeb] px-4 py-3.5 text-sm text-[#92400e]"
+          className="rounded-[10px] border border-[#fde68a] bg-[#fffbeb] px-4 py-4 text-sm text-[#92400e]"
         >
           <div className="flex items-start gap-2.5">
             <KeyRound size={16} className="mt-0.5 shrink-0 text-[#b45309]" />
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <p className="font-semibold text-[#78350f]">
-                {paused
-                  ? 'Automatic decisions are off for this workspace.'
-                  : !state.configured
-                    ? 'Operations workflow service is not configured yet.'
-                    : 'Operations worker is not ready to start new runs.'}
-              </p>
-              <p className="text-xs leading-relaxed text-[#92400e]">
-                {paused
-                  ? 'Turn on Automatic decisions above to run workflows or enable triggers. Recorded run history, evidence, and instructions remain accessible.'
-                  : 'You can inspect recorded runs and edit workflow instructions now. Starting new runs requires a configured service, a healthy worker, and Automatic decisions turned on. MCP connection reviews also require owner-approved read tools in Connections.'}
-              </p>
-              <details className="pt-1 text-xs">
-                <summary className="cursor-pointer font-semibold text-[#78350f]">
-                  View service readiness checks
-                </summary>
-                <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                  {setupChecks.map((check) => (
-                    <li
-                      key={check.label}
-                      className="flex items-center justify-between rounded border border-[#fde68a] bg-white px-2.5 py-1.5"
+            <div className="min-w-0 flex-1 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="font-semibold text-[#78350f]">
+                    {paused
+                      ? 'Runs paused — decision service is off.'
+                      : 'Setup required before starting new cases.'}
+                  </p>
+                  <p className="text-xs leading-relaxed text-[#92400e]">
+                    {paused
+                      ? 'Manual runs also require the decision service enabled. Recorded cases, evidence, reports, and workflow instructions remain readable.'
+                      : 'Manual runs also require the decision service enabled alongside a configured operations model, available runtime, and online worker. No credentials or API keys are entered in this screen.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {decisionServiceOn === false && (
+                    <button
+                      type="button"
+                      className="dm-button dm-button-primary"
+                      onClick={focusDecisionSettings}
                     >
-                      <span className="text-[#334155]">{check.label}</span>
+                      Go to decision service settings
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="dm-button"
+                    onClick={() => navigateSettings('AUTOMATION', '#automation')}
+                  >
+                    Open Automation settings
+                  </button>
+                  <button
+                    type="button"
+                    className="dm-button"
+                    onClick={() => navigateSettings('CONNECTORS', '#connections')}
+                  >
+                    Open Connections settings
+                  </button>
+                </div>
+              </div>
+
+              <ul
+                className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+                aria-label="Operations readiness conditions"
+              >
+                {readinessChecks.map((check) => (
+                  <li
+                    key={check.id}
+                    className="rounded-md border border-[#fde68a] bg-white px-3 py-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-[#475569]">{check.label}</span>
                       <span
                         className={`font-semibold ${
-                          check.value ? 'text-[#15803d]' : 'text-[#64748b]'
+                          check.ready
+                            ? 'text-[#15803d]'
+                            : check.unknown
+                              ? 'text-[#64748b]'
+                              : 'text-[#b45309]'
                         }`}
                       >
-                        {check.value ? 'Ready' : 'Not ready'}
+                        {check.status}
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-snug text-[#64748b]">{check.detail}</p>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
       )}
 
-      {/* Primary Action Ledger Bar: Choose Workflow + Target + Run workflow */}
+      {/* Top Primary Action Ledger Bar: New case (Predefined Workflow + Target) */}
       <section
+        ref={newCaseRef}
+        id="ops-desk-new-case"
         className="dm-card"
         aria-labelledby="ops-desk-runner-title"
       >
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e2e8f0] pb-4">
           <div>
             <h2 id="ops-desk-runner-title" className="text-base font-semibold text-[#0f172a]">
-              Start an operations workflow
+              New case
             </h2>
             <p className="mt-0.5 text-xs text-[#64748b]">
-              {activeSkill.text} Checks are read-only and record verifiable evidence.
+              A workspace owner can select a predefined workflow below to start a read-only case,
+              with no new arbitrary agents or tools. {activeSkill.text}
             </p>
           </div>
           <ol
             className="hidden flex-wrap items-center gap-1.5 text-[11px] text-[#64748b] md:flex"
-            aria-label="Workflow check sequence"
+            aria-label="Predefined workflow sequence"
           >
             {activeSkill.steps.map((stepLabel, idx) => (
               <li key={stepLabel} className="inline-flex items-center gap-1">
@@ -700,7 +872,7 @@ export function OperationsJobsPanel({
 
         <form onSubmit={handleRunWorkflow} className="mt-4 space-y-3">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
-            <label className="block md:col-span-4">
+            <label className="block md:col-span-3">
               <span className="block text-xs font-medium text-[#334155]">Workflow</span>
               <select
                 className="dm-input mt-1.5 w-full"
@@ -721,7 +893,7 @@ export function OperationsJobsPanel({
             </label>
 
             {targets.length > 8 && (
-              <label className="block md:col-span-3">
+              <label className="block md:col-span-2">
                 <span className="block text-xs font-medium text-[#334155]">Filter targets</span>
                 <input
                   type="search"
@@ -761,10 +933,26 @@ export function OperationsJobsPanel({
               </select>
             </label>
 
-            <div className="flex items-center gap-2 md:col-span-2 md:justify-end">
+            <div className="flex flex-wrap items-center gap-2 md:col-span-4 md:justify-end">
+              <button
+                type="button"
+                className={
+                  !ready
+                    ? 'dm-button dm-button-primary flex-1 justify-center whitespace-nowrap sm:flex-initial'
+                    : 'dm-button flex-1 justify-center whitespace-nowrap sm:flex-initial'
+                }
+                disabled={!owner || busy || !visibleTarget}
+                onClick={() => void handleSaveDraft()}
+              >
+                Save draft
+              </button>
               <button
                 type="submit"
-                className="dm-button dm-button-primary w-full justify-center whitespace-nowrap"
+                className={
+                  ready
+                    ? 'dm-button dm-button-primary flex-1 justify-center whitespace-nowrap sm:flex-initial'
+                    : 'dm-button flex-1 justify-center whitespace-nowrap sm:flex-initial'
+                }
                 disabled={
                   !ready ||
                   !owner ||
@@ -774,17 +962,28 @@ export function OperationsJobsPanel({
                 }
               >
                 {busy ? <RefreshCw size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-                Run workflow
+                Start case
               </button>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#64748b]">
             <div className="space-y-0.5">
+              {paused && (
+                <p className="text-[#b45309]">
+                  Runs paused — manual runs also require the decision service enabled. Owners can
+                  still Save draft with no model calls.
+                </p>
+              )}
+              {state && !ready && !paused && (
+                <p className="text-[#475569]">
+                  Owners can Save draft while setup is pending; drafts make no model calls.
+                </p>
+              )}
               {!owner && state && (
                 <p className="text-[#475569]">
-                  Workspace owner permission is required to start workflows, cancel active runs, or
-                  edit triggers.
+                  Workspace owner permission is required to save drafts, start cases, cancel active
+                  runs, or edit triggers.
                 </p>
               )}
               {state && !targets.length && (
@@ -878,15 +1077,15 @@ export function OperationsJobsPanel({
           </button>
         </div>
 
-        {/* TAB 1: RUNS & EVIDENCE (Desktop Queue + Evidence Inspector; Mobile Stacked Zero-Overflow) */}
+        {/* TAB 1: CASE INBOX (Desktop Queue + Evidence Inspector; Mobile Stacked Zero-Overflow) */}
         <div
           role="tabpanel"
-          id="ops-desk-panel-runs"
-          aria-labelledby="ops-desk-tab-runs"
-          hidden={tab !== 'runs'}
+          id="ops-desk-panel-inbox"
+          aria-labelledby="ops-desk-tab-inbox"
+          hidden={tab !== 'inbox'}
         >
           {loading && !state ? (
-            <div className="space-y-3 p-6" role="status" aria-label="Loading recorded runs">
+            <div className="space-y-3 p-6" role="status" aria-label="Loading recorded cases">
               <div className="dm-skeleton h-12 w-full" />
               <div className="dm-skeleton h-12 w-full" />
               <div className="dm-skeleton h-12 w-4/5" />
@@ -894,21 +1093,23 @@ export function OperationsJobsPanel({
           ) : !jobs.length ? (
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
               <ListChecks size={26} className="text-[#94a3b8]" />
-              <h3 className="text-sm font-semibold text-[#0f172a]">No recorded runs yet</h3>
+              <h3 className="text-sm font-semibold text-[#0f172a]">No recorded cases yet</h3>
               <p className="max-w-md text-xs leading-relaxed text-[#64748b]">
-                Select a workflow and workspace target above, then choose Run workflow. Recorded
-                checks, timestamped evidence, and proposals awaiting review will appear here.
+                Select a predefined workflow and workspace target in New case above to open a case.
+                Recorded checks, timestamped evidence, reports, and proposed changes will appear
+                here.
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,0.92fr)_minmax(0,1.4fr)]">
-              {/* Left Column: Filterable Run Queue */}
+              {/* Left Column: Filterable Case Queue */}
               <div className="min-w-0 border-b border-[#e2e8f0] lg:border-b-0 lg:border-r">
                 <div className="space-y-2.5 border-b border-[#e2e8f0] bg-[#f8fafc] p-4">
-                  <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter runs by status">
+                  <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter cases by status">
                     {(
                       [
                         ['all', 'All', jobs.length],
+                        ['draft', 'Draft', draftCount],
                         ['review', 'Awaiting review', reviewCount],
                         ['attention', 'Failed / held', attentionCount],
                         ['active', 'Active', activeRunCount],
@@ -940,7 +1141,7 @@ export function OperationsJobsPanel({
 
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <label className="block">
-                      <span className="sr-only">Filter runs by workflow</span>
+                      <span className="sr-only">Filter cases by workflow</span>
                       <select
                         className="dm-input h-9 w-full text-xs"
                         value={workflowFilter}
@@ -955,7 +1156,7 @@ export function OperationsJobsPanel({
                       </select>
                     </label>
                     <label className="relative block">
-                      <span className="sr-only">Search runs</span>
+                      <span className="sr-only">Search cases</span>
                       <Search
                         size={13}
                         className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8]"
@@ -972,7 +1173,7 @@ export function OperationsJobsPanel({
 
                   <div className="flex items-center justify-between text-[11px] tabular-nums text-[#64748b]">
                     <span>
-                      Showing {displayedJobs.length} of {filteredJobs.length} matching runs
+                      Showing {displayedJobs.length} of {filteredJobs.length} matching cases
                     </span>
                     {(statusFilter !== 'all' || workflowFilter !== 'all' || runSearch) && (
                       <button
@@ -991,11 +1192,11 @@ export function OperationsJobsPanel({
                 </div>
 
                 {displayedJobs.length ? (
-                  <ul className="divide-y divide-[#e2e8f0]" aria-label="Recorded workflow runs">
+                  <ul className="divide-y divide-[#e2e8f0]" aria-label="Recorded cases">
                     {displayedJobs.map((job) => {
                       const isSelected = job.id === inspectedJob?.id;
                       const proposalPending = hasPendingProposal(job);
-                      const canCancel = owner && ['queued', 'running'].includes(job.status);
+                      const canCancel = owner && ['draft', 'queued', 'running'].includes(job.status);
 
                       return (
                         <li
@@ -1030,6 +1231,9 @@ export function OperationsJobsPanel({
                               </p>
                               <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] tabular-nums text-[#64748b]">
                                 <span>{formatStamp(job.updated_at)}</span>
+                                {job.status === 'draft' && (
+                                  <span>· No model calls</span>
+                                )}
                                 {proposalPending && (
                                   <span className="font-semibold text-[#b45309]">
                                     · Proposal awaiting review
@@ -1054,7 +1258,9 @@ export function OperationsJobsPanel({
                                         `/v1/operations/jobs/${encodeURIComponent(job.id)}/cancel`,
                                         {}
                                       ),
-                                    'Cancellation requested for active run.'
+                                    job.status === 'draft'
+                                      ? 'Draft case cancelled.'
+                                      : 'Cancellation requested for active run.'
                                   )
                                 }
                                 className="shrink-0 text-xs font-semibold text-[#b91c1c] hover:underline"
@@ -1069,7 +1275,7 @@ export function OperationsJobsPanel({
                   </ul>
                 ) : (
                   <div className="p-8 text-center text-xs text-[#64748b]">
-                    No runs match these filters.
+                    No cases match these filters.
                   </div>
                 )}
 
@@ -1081,30 +1287,30 @@ export function OperationsJobsPanel({
                       onClick={() => setShowAllRuns((v) => !v)}
                     >
                       {showAllRuns
-                        ? 'Show latest 10 runs'
-                        : `Show all ${filteredJobs.length.toLocaleString()} matching runs`}
+                        ? 'Show latest 10 cases'
+                        : `Show all ${filteredJobs.length.toLocaleString()} matching cases`}
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Right Column: Selected-Run Evidence Inspector */}
+              {/* Right Column: Selected-Case Evidence Inspector */}
               <div
                 ref={inspectorRef}
                 className="min-w-0 bg-[#f8fafc]/45 p-5 sm:p-6"
                 aria-live="polite"
-                aria-label="Selected run evidence inspector"
+                aria-label="Selected case evidence inspector"
               >
                 {!inspectedJob ? (
                   <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center text-xs text-[#64748b]">
-                    <p>Select a run from the list to inspect checks, evidence, and proposals.</p>
+                    <p>Select a case from the inbox to inspect checks, evidence, reports, and proposals.</p>
                   </div>
                 ) : (
                   <div className="space-y-5">
-                    {/* Run Title & Actions */}
+                    {/* Case Title & Actions */}
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e2e8f0] pb-4">
                       <div className="min-w-0">
-                        <p className="text-xs font-medium text-[#64748b]">Selected run</p>
+                        <p className="text-xs font-medium text-[#64748b]">Selected case</p>
                         <h3 className="mt-0.5 text-lg font-semibold tracking-tight text-[#0f172a]">
                           {WORKFLOW_NAMES[inspectedJob.workflow] ||
                             inspectedJob.workflow.replaceAll('-', ' ')}
@@ -1115,7 +1321,30 @@ export function OperationsJobsPanel({
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        {owner && ['queued', 'running'].includes(inspectedJob.status) && (
+                        {inspectedJob.status === 'draft' && (
+                          <button
+                            type="button"
+                            className="dm-button dm-button-primary"
+                            disabled={
+                              !ready ||
+                              !owner ||
+                              busy ||
+                              (['company-enrichment', 'people-enrichment'].includes(
+                                inspectedJob.workflow
+                              ) &&
+                                !state?.research_configured)
+                            }
+                            onClick={() => void handleStartDraftCase(inspectedJob)}
+                          >
+                            {busy ? (
+                              <RefreshCw size={14} className="animate-spin" />
+                            ) : (
+                              <ArrowRight size={14} />
+                            )}
+                            Start case
+                          </button>
+                        )}
+                        {owner && ['draft', 'queued', 'running'].includes(inspectedJob.status) && (
                           <button
                             type="button"
                             className="dm-button"
@@ -1127,15 +1356,84 @@ export function OperationsJobsPanel({
                                     `/v1/operations/jobs/${encodeURIComponent(inspectedJob.id)}/cancel`,
                                     {}
                                   ),
-                                'Cancellation requested for this run.'
+                                inspectedJob.status === 'draft'
+                                  ? 'Draft case cancelled.'
+                                  : 'Cancellation requested for this run.'
                               )
                             }
                           >
-                            Cancel run
+                            {inspectedJob.status === 'draft' ? 'Cancel draft' : 'Cancel run'}
                           </button>
                         )}
                       </div>
                     </div>
+
+                    {inspectedJob.status === 'draft' && (() => {
+                      const draftNeedsResearch = [
+                        'company-enrichment',
+                        'people-enrichment',
+                      ].includes(inspectedJob.workflow);
+                      const blockReasons: string[] = [];
+                      if (!owner) {
+                        blockReasons.push('Workspace owner permission is required to start a case.');
+                      }
+                      if (!state) {
+                        blockReasons.push('Operations Desk readiness status is unavailable.');
+                      } else {
+                        if (paused || decisionServiceOn === false) {
+                          blockReasons.push(
+                            'Runs paused — decision service is off (manual runs also require the decision service enabled).'
+                          );
+                        }
+                        if (!state.configured) {
+                          blockReasons.push('Operations model is unconfigured.');
+                        }
+                        if (!state.installed) {
+                          blockReasons.push('Operations runtime is unavailable.');
+                        }
+                        if (!state.enabled) {
+                          blockReasons.push('Operations worker is off.');
+                        } else if (!state.worker_healthy) {
+                          blockReasons.push('Operations worker is offline.');
+                        }
+                        if (draftNeedsResearch && !state.research_configured) {
+                          blockReasons.push(
+                            'Public research connection is not configured in Connections.'
+                          );
+                        }
+                        if (!ready && blockReasons.length === 0) {
+                          blockReasons.push('Run readiness checks have not passed yet.');
+                        }
+                      }
+
+                      return (
+                        <div
+                          role="status"
+                          className="rounded-lg border border-[#e2e8f0] bg-white p-4 text-xs text-[#334155]"
+                        >
+                          <p className="font-semibold text-[#0f172a]">
+                            Draft case saved — no model calls have been made.
+                          </p>
+                          {blockReasons.length > 0 ? (
+                            <div className="mt-2 space-y-1 text-[#92400e]">
+                              <p className="font-medium text-[#78350f]">
+                                Start case is disabled until run readiness checks pass:
+                              </p>
+                              <ul className="list-disc space-y-0.5 pl-4">
+                                {blockReasons.map((reason) => (
+                                  <li key={reason}>{reason}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="mt-1 text-[#475569]">
+                              Readiness checks pass. Select Start case above to queue read-only
+                              checks and record evidence.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {detailError && (
                       <div role="alert" className="dm-notice dm-notice-error text-xs">
@@ -1153,11 +1451,13 @@ export function OperationsJobsPanel({
                           {formatStatusLabel(inspectedJob.status)}
                         </dd>
                         <p className="mt-0.5 text-[11px] tabular-nums text-[#64748b]">
-                          {detailLoading
-                            ? 'Loading check log…'
-                            : detail
-                              ? `${inspectedSteps.length} check${inspectedSteps.length === 1 ? '' : 's'} recorded`
-                              : 'Step count unavailable'}
+                          {inspectedJob.status === 'draft'
+                            ? 'Not started · no model calls'
+                            : detailLoading
+                              ? 'Loading check log…'
+                              : detail
+                                ? `${inspectedSteps.length} check${inspectedSteps.length === 1 ? '' : 's'} recorded`
+                                : 'Step count unavailable'}
                         </p>
                       </div>
 
@@ -1304,9 +1604,11 @@ export function OperationsJobsPanel({
                       <h4 className="text-sm font-semibold text-[#0f172a]">Findings summary</h4>
                       <p className="mt-1.5 whitespace-pre-line break-words text-sm leading-relaxed text-[#334155]">
                         {inspectedReport?.summary ||
-                          (['queued', 'running'].includes(inspectedJob.status)
-                            ? 'Checks are still running. A validated summary will appear once checks finish.'
-                            : 'No validated summary was recorded for this run.')}
+                          (inspectedJob.status === 'draft'
+                            ? 'Draft case saved with no model calls. Start this case once readiness checks pass to run read-only checks and record evidence.'
+                            : ['queued', 'running'].includes(inspectedJob.status)
+                              ? 'Checks are still running. A validated summary will appear once checks finish.'
+                              : 'No validated summary was recorded for this run.')}
                       </p>
                       {inspectedReport?.outcome && (
                         <p className="mt-2 border-t border-[#f1f5f9] pt-2 text-xs text-[#64748b]">
@@ -1445,7 +1747,100 @@ export function OperationsJobsPanel({
           )}
         </div>
 
-        {/* TAB 2: AUTOMATIC TRIGGERS */}
+        {/* TAB 2: PREDEFINED WORKFLOWS */}
+        <div
+          role="tabpanel"
+          id="ops-desk-panel-workflows"
+          aria-labelledby="ops-desk-tab-workflows"
+          hidden={tab !== 'workflows'}
+          className="space-y-4 p-6"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-[#0f172a]">Predefined workflows</h3>
+              <p className="mt-0.5 text-xs text-[#64748b]">
+                Workspace owners can select from these fixed read-only workflows to open a case. No
+                new arbitrary agents or tools are created here.
+              </p>
+            </div>
+            <span className="text-xs font-medium text-[#475569]">Read-only evidence checks</span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {SKILLS.map((skill) => {
+              const Icon = skill.icon;
+              const targetCount = state?.targets[skill.id]?.length ?? null;
+              const researchRequired = ['company-enrichment', 'people-enrichment'].includes(
+                skill.id
+              );
+              const isSelected = workflow === skill.id;
+              return (
+                <article
+                  key={skill.id}
+                  className={`flex flex-col justify-between rounded-lg border p-4 ${
+                    isSelected
+                      ? 'border-[#93c5fd] bg-[#eff6ff]/40'
+                      : 'border-[#e2e8f0] bg-white'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Icon size={16} className="shrink-0 text-[#475569]" />
+                        <h4 className="text-sm font-semibold text-[#0f172a]">{skill.title}</h4>
+                      </div>
+                      <span className="text-[11px] font-medium tabular-nums text-[#64748b]">
+                        {targetCount == null
+                          ? '—'
+                          : `${targetCount} target${targetCount === 1 ? '' : 's'}`}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs leading-relaxed text-[#475569]">{skill.text}</p>
+                    <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#64748b]">
+                      {skill.steps.map((stepName, idx) => (
+                        <li key={stepName} className="inline-flex items-center gap-1">
+                          <span className="font-semibold text-[#0f172a]">{idx + 1}.</span>
+                          <span>{stepName}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    {researchRequired && state && !state.research_configured && (
+                      <p className="mt-2 text-[11px] font-medium text-[#b45309]">
+                        Requires public research connection in Connections.
+                      </p>
+                    )}
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[#f1f5f9] pt-3 text-xs">
+                    <button
+                      type="button"
+                      className="font-semibold text-[#1d4ed8] hover:underline"
+                      onClick={() => {
+                        setWorkflow(skill.id);
+                        setTarget('');
+                        setTargetSearch('');
+                        newCaseRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                    >
+                      Select in New case
+                    </button>
+                    <button
+                      type="button"
+                      className="font-medium text-[#475569] hover:text-[#0f172a]"
+                      onClick={() => {
+                        setWorkflow(skill.id);
+                        setTab('instructions');
+                      }}
+                    >
+                      Instructions
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* TAB 3: AUTOMATIC TRIGGERS */}
         <div
           role="tabpanel"
           id="ops-desk-panel-triggers"
