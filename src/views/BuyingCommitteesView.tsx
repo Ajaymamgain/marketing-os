@@ -1,287 +1,506 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from "react";
 import {
+  ArrowRight,
   Users,
-  Shield,
-  CheckCircle2,
-  AlertTriangle,
-  UserPlus,
-  Search,
-  ExternalLink,
-  ChevronRight,
-  TrendingUp,
-} from 'lucide-react';
-import { AccountDemandUnit, BuyingRole, CommitteeMember } from '../types';
-import { playCadClick, playCadConfirm } from '../utils/audio';
-
-interface BuyingCommitteesViewProps {
+  ShieldCheck,
+  Check,
+  Sparkles,
+  ChevronDown,
+} from "lucide-react";
+import { AccountDemandUnit, CommitteeMember } from "../types";
+import { verifyMemberRole, fetchWorkspaceAccess } from "../services/api";
+interface Props {
   accounts: AccountDemandUnit[];
   onSelectAccount: (account: AccountDemandUnit) => void;
   onAddMember?: (accountId: string, member: CommitteeMember) => void;
+  onApplied?: () => void;
 }
-
-export const BuyingCommitteesView: React.FC<BuyingCommitteesViewProps> = ({
+const roles = [
+  { id: "champion", name: "Champion" },
+  { id: "economic_buyer", name: "Economic buyer" },
+  { id: "technical_evaluator", name: "Technical evaluator" },
+];
+const overrideRoles = [
+  ...roles,
+  { id: "influencer", name: "Influencer" },
+  { id: "user", name: "User" },
+];
+function inferenceLabel(member: CommitteeMember) {
+  if (member.roleSource === "human") return "Owner verified";
+  if (member.roleSource === "verified") return "Source verified";
+  if (member.roleInference?.status === "accepted") return "Automatically inferred";
+  if (member.roleInference?.status === "unavailable")
+    return "Inference unavailable";
+  if (member.roleInference?.status === "uncertain")
+    return "Insufficient evidence";
+  if (member.roleInference?.status === "stale") return "Evidence changed";
+  return "Awaiting automatic evaluation";
+}
+export const BuyingCommitteesView: React.FC<Props> = ({
   accounts,
   onSelectAccount,
+  onApplied,
 }) => {
-  const [filterMissingRole, setFilterMissingRole] = useState<string>('ALL');
-  const [search, setSearch] = useState('');
-  const [addingMemberAccId, setAddingMemberAccId] = useState<string | null>(null);
-
-  // Quick form state
-  const [newName, setNewName] = useState('');
-  const [newTitle, setNewTitle] = useState('');
-  const [newRole, setNewRole] = useState<BuyingRole>('technical_champion');
-  const [newEmail, setNewEmail] = useState('');
-
-  const filtered = accounts.filter((acc) => {
-    if (search && !acc.accountName.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterMissingRole !== 'ALL' && !acc.committee.missingRoles.includes(filterMissingRole as BuyingRole)) {
-      return false;
-    }
-    return true;
-  });
-
-  const handleSaveMember = (acc: AccountDemandUnit) => {
-    if (!newName) return;
-    playCadConfirm();
-    const createdMember: CommitteeMember = {
-      id: `MEM-${Date.now().toString().slice(-4)}`,
-      name: newName,
-      title: newTitle || 'Stakeholder',
-      role: newRole,
-      sentiment: 'SUPPORTIVE',
-      influenceLevel: 'HIGH',
-      engagementScore: 78,
-      lastSeen: 'Just now',
-      email: newEmail || `${newName.toLowerCase().replace(' ', '.')}@${acc.domain}`,
-      keyNotes: 'Added via Buying Committee Operations workspace.',
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState("");
+  const [limit, setLimit] = useState(12);
+  const [verification, setVerification] = useState<{
+    email: string;
+    role: string;
+  } | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [owner, setOwner] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetchWorkspaceAccess()
+      .then((access) => {
+        if (active) setOwner(access.role === "owner");
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
     };
-
-    acc.committee.members.push(createdMember);
-    acc.committee.missingRoles = acc.committee.missingRoles.filter((r) => r !== newRole);
-    acc.committee.totalIdentified = acc.committee.members.length;
-    acc.committee.coverageScore = Math.min(100, Math.round((acc.committee.totalIdentified / 6) * 100));
-
-    setAddingMemberAccId(null);
-    setNewName('');
-    setNewTitle('');
-    setNewEmail('');
+  }, []);
+  const filtered = accounts.filter((a) => {
+    const matchesSearch = [a.accountName, a.domain, a.solutionTarget].some(
+      (v) => v.toLowerCase().includes(query.toLowerCase()),
+    );
+    const matchesCoverage =
+      filter === "all" ||
+      (filter === "zero"
+        ? a.committee.coverageScore === 0
+        : a.committee.missingRoles.includes(filter));
+    return matchesSearch && matchesCoverage;
+  });
+  const selected = filtered.find((a) => a.id === selectedId) || filtered[0];
+  useEffect(() => {
+    setVerification(null);
+    setConfirmed(false);
+    setError("");
+    setNotice("");
+  }, [selected?.id]);
+  const verify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected || !verification || !confirmed) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await verifyMemberRole(
+        selected.id,
+        verification.email,
+        verification.role,
+      );
+      setVerification(null);
+      setConfirmed(false);
+      setNotice(
+        "Owner override saved. A fresh score evaluation is queued; consent and recency still apply.",
+      );
+      onApplied?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Role override failed.");
+    } finally {
+      setSaving(false);
+    }
   };
-
+  const allMembers = accounts.flatMap((a) => a.committee.members);
+  const committeeMembers = [...(selected?.committee.members || [])].sort(
+    (a, b) => {
+      const rank = (member: CommitteeMember) =>
+        member.status === "active"
+          ? 0
+          : member.roleInference?.status === "accepted"
+            ? 1
+            : 2;
+      const recency = (member: CommitteeMember) =>
+        Date.parse(member.lastSeen) || 0;
+      return rank(a) - rank(b) || recency(b) - recency(a);
+    },
+  );
   return (
-    <div className="space-y-6 animate-fadeIn font-mono">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cyan-500/20 pb-4">
+    <div className="mx-auto max-w-[1440px] space-y-6">
+      <div className="dm-page-heading">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 border border-cyan-400/40 text-cyan-300 font-bold">
-              SYS.01 // BUYING COMMITTEES
-            </span>
-            <span className="text-xs text-slate-400">ENTERPRISE 6-PERSONA MAPPING MATRIX</span>
-          </div>
-          <h2 className="text-xl font-bold text-white tracking-tight mt-1">
-            Enterprise Buying Committee Operations
-          </h2>
-          <p className="text-xs text-slate-400">
-            Audits stakeholder multi-threading across 6 core personas required for enterprise deal velocity.
+          <p className="dm-eyebrow">DEMAND INTELLIGENCE</p>
+          <h1>Buying committees</h1>
+          <p>
+            Automatically map the people behind each buying need, with evidence
+            for every role.
           </p>
         </div>
-
-        <div className="flex items-center gap-2 text-xs">
-          <span className="px-2.5 py-1 rounded bg-[#081220] border border-cyan-500/30 text-cyan-300">
-            REQUIRED ROLES: 6 PER DU
-          </span>
-          <span className="px-2.5 py-1 rounded bg-[#081220] border border-amber-500/30 text-amber-300">
-            {accounts.filter((a) => a.committee.missingRoles.includes('economic_buyer')).length} MISSING ECONOMIC BUYER
-          </span>
-        </div>
+        <span className="dm-badge">
+          <Sparkles size={14} />
+          Automatic role inference
+        </span>
       </div>
-
-      {/* Filter Bar */}
-      <div className="p-3 rounded bg-[#081220] border border-cyan-500/20 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-slate-400">FILTER MISSING ROLE:</span>
-          {[
-            { id: 'ALL', label: 'ALL ACCOUNTS' },
-            { id: 'economic_buyer', label: 'MISSING ECONOMIC BUYER' },
-            { id: 'security_infosec', label: 'MISSING INFOSEC' },
-            { id: 'procurement', label: 'MISSING PROCUREMENT' },
-          ].map((item) => (
+      <div className="grid sm:grid-cols-3 gap-4">
+        {[
+          [
+            "Identified people",
+            allMembers.length,
+            "Imported contacts across demand units",
+          ],
+          [
+            "Automatically mapped",
+            allMembers.filter(
+              (m) =>
+                m.roleSource === "jev_inferred" &&
+                m.roleInference?.status === "accepted",
+            ).length,
+            "Inferred roles supported by current evidence",
+          ],
+          [
+            "Coverage-ready people",
+            allMembers.filter((m) => m.status === "active").length,
+            "Supported role, consent and recent engagement",
+          ],
+        ].map(([label, value, note]) => (
+          <article key={String(label)} className="dm-card dm-metric">
+            <div>{label}</div>
+            <strong>{value}</strong>
+            <p>{note}</p>
+          </article>
+        ))}
+      </div>
+      <details className="dm-card dm-committee-automation">
+        <summary className="dm-committee-help-summary">
+          <Sparkles size={18} />
+          How the committee is built
+          <ChevronDown size={16} />
+        </summary>
+        <p className="dm-caption mt-3">
+          Runs during scoring after imports and on scheduled refreshes. No
+          manual role labels required.
+        </p>
+        <div className="dm-committee-steps">
+          <div>
+            <span>01</span>
+            <h3>Understand the person</h3>
+            <p>
+              Job title, company industry and the specific business need
+              establish the relevant function.
+            </p>
+          </div>
+          <div>
+            <span>02</span>
+            <h3>Read the evidence</h3>
+            <p>
+              Recent person-level activities help distinguish an evaluator,
+              buyer, user or advocate.
+            </p>
+          </div>
+          <div>
+            <span>03</span>
+            <h3>Apply supported roles</h3>
+            <p>
+              Strong evidence can count automatically. Ambiguous contacts stay
+              uncertain; new evidence triggers a fresh evaluation.
+            </p>
+          </div>
+        </div>
+        <div className="dm-committee-policy">
+          <ShieldCheck size={17} />
+          <p>
+            A senior title or a pricing visit does not establish a champion.
+            Internal advocacy needs its own recorded evidence. Consent and the
+            configured engagement window still apply.
+          </p>
+        </div>
+      </details>
+      {error && (
+        <div role="alert" className="dm-notice dm-notice-error">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div role="status" className="dm-notice">
+          <Check size={18} />
+          {notice}
+        </div>
+      )}
+      <section className="dm-card flex flex-wrap gap-4">
+        <label className="dm-field flex-1 min-w-[200px]">
+          Search demand units
+          <input
+            className="dm-input"
+            placeholder="Account, domain, or need"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setLimit(12);
+            }}
+          />
+        </label>
+        <label className="dm-field">
+          Coverage filter
+          <select
+            className="dm-input"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              setLimit(12);
+            }}
+          >
+            <option value="all">All buying groups</option>
+            <option value="zero">Zero coverage</option>
+            {roles.map((r) => (
+              <option key={r.id} value={r.id}>
+                Missing {r.name.toLowerCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+      <div className="grid gap-5 lg:grid-cols-[1fr_1.3fr]">
+        <section className="space-y-3 order-2 lg:order-1 self-start lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+          <p className="dm-caption">{filtered.length} matching demand units</p>
+          {filtered.slice(0, limit).map((a) => (
             <button
-              key={item.id}
-              onClick={() => {
-                playCadClick();
-                setFilterMissingRole(item.id);
-              }}
-              className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                filterMissingRole === item.id
-                  ? 'bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-bold'
-                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
-              }`}
+              key={a.id}
+              className={`dm-committee-unit ${selected?.id === a.id ? "is-selected" : ""}`}
+              onClick={() => setSelectedId(a.id)}
             >
-              {item.label}
+              <div className="flex justify-between items-start gap-3">
+                <div>
+                  <h2 className="font-semibold text-sm">{a.accountName}</h2>
+                  <p className="dm-caption mt-1">{a.solutionTarget}</p>
+                </div>
+                <span
+                  className={`dm-badge ${a.committee.coverageScore === 0 ? "dm-badge-amber" : ""}`}
+                >
+                  {a.committee.coverageScore}% coverage
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-[#e7edf7] mt-4">
+                <div
+                  className="h-full rounded-full bg-[#2457d6]"
+                  style={{ width: `${a.committee.coverageScore}%` }}
+                />
+              </div>
+              <p className="dm-caption mt-3">
+                {a.committee.members.length} identified ·{" "}
+                {
+                  a.committee.members.filter((m) => m.status === "active")
+                    .length
+                }{" "}
+                coverage-ready
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {roles.map((r) => (
+                  <span
+                    key={r.id}
+                    className={`text-xs ${a.committee.missingRoles.includes(r.id) ? "text-[#875008]" : "text-[#1c7552]"}`}
+                  >
+                    {a.committee.missingRoles.includes(r.id) ? "○" : "✓"}{" "}
+                    {r.name}
+                  </span>
+                ))}
+              </div>
             </button>
           ))}
-        </div>
-
-        <div className="text-slate-400 text-xs">
-          SHOWING {filtered.length} OF {accounts.length} ACCOUNTS
-        </div>
-      </div>
-
-      {/* Committees Account List */}
-      <div className="space-y-4">
-        {filtered.map((acc) => (
-          <div
-            key={acc.id}
-            className="p-4 rounded bg-[#081220] border border-cyan-500/25 space-y-3.5 hover:border-cyan-400/40 transition-all"
-          >
-            {/* Account Header in Committee row */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-cyan-900/30 pb-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="text-sm font-bold text-white">{acc.accountName}</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-500/30 text-cyan-300">
-                  {acc.primaryMotion}
-                </span>
-                <span className="text-[10px] text-slate-400">ARR: ${(acc.estDealValue / 1000).toFixed(0)}k</span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400 text-[11px]">COVERAGE:</span>
-                  <span className="text-amber-300 font-bold text-xs">{acc.committee.coverageScore}%</span>
-                  <span className="text-slate-500 text-[10px]">
-                    ({acc.committee.totalIdentified}/6 Roles)
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => {
-                    playCadClick();
-                    setAddingMemberAccId(addingMemberAccId === acc.id ? null : acc.id);
-                  }}
-                  className="px-2 py-1 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <UserPlus className="w-3 h-3 text-cyan-400" />
-                  <span>ADD STAKEHOLDER</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    playCadClick();
-                    onSelectAccount(acc);
-                  }}
-                  className="px-2 py-1 rounded bg-[#070e1a] hover:bg-slate-800 border border-slate-700 text-slate-300 text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <span>INSPECT</span>
-                  <ChevronRight className="w-3 h-3" />
-                </button>
-              </div>
+          {!filtered.length && (
+            <div className="dm-card dm-empty">
+              No buying groups match this filter.
             </div>
-
-            {/* Quick Add Stakeholder Inline Form */}
-            {addingMemberAccId === acc.id && (
-              <div className="p-3 rounded bg-[#060c17] border border-cyan-400/40 space-y-3 animate-fadeIn">
-                <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
-                  <UserPlus className="w-3.5 h-3.5 text-cyan-400" />
-                  MAP NEW STAKEHOLDER TO {acc.accountName.toUpperCase()}
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-                  <input
-                    type="text"
-                    placeholder="Full Name (e.g. Dr. Maya Lin)"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="p-1.5 rounded bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Title (e.g. VP Infrastructure)"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    className="p-1.5 rounded bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                  />
-                  <select
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as BuyingRole)}
-                    className="p-1.5 rounded bg-slate-900 border border-slate-700 text-cyan-300 focus:outline-none focus:border-cyan-400"
-                  >
-                    <option value="technical_champion">Technical Champion</option>
-                    <option value="economic_buyer">Economic Buyer</option>
-                    <option value="security_infosec">Security / InfoSec</option>
-                    <option value="day_to_day_evaluator">Day-to-day Evaluator</option>
-                    <option value="procurement">Procurement / Legal</option>
-                    <option value="executive_sponsor">Executive Sponsor</option>
-                  </select>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleSaveMember(acc)}
-                      className="flex-1 py-1.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold cursor-pointer transition-colors"
-                    >
-                      CONFIRM MAP
-                    </button>
-                    <button
-                      onClick={() => setAddingMemberAccId(null)}
-                      className="px-3 py-1.5 rounded bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      CANCEL
-                    </button>
-                  </div>
+          )}
+          {filtered.length > limit && (
+            <button
+              className="dm-button w-full"
+              onClick={() => setLimit((v) => v + 12)}
+            >
+              Show 12 more groups
+            </button>
+          )}
+        </section>
+        <section className="dm-card self-start order-1 lg:order-2 lg:sticky lg:top-24">
+          {selected ? (
+            <>
+              <div className="dm-section-title">
+                <div>
+                  <h2>{selected.accountName}</h2>
+                  <p>{selected.solutionTarget}</p>
                 </div>
-              </div>
-            )}
-
-            {/* Mapped Members Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-              {acc.committee.members.map((member) => (
-                <div
-                  key={member.id}
-                  className="p-2.5 rounded bg-[#070e1a] border border-cyan-950 flex items-start justify-between gap-2"
+                <button
+                  className="dm-text-button"
+                  onClick={() => onSelectAccount(selected)}
                 >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-white">{member.name}</span>
+                  Inspect demand <ArrowRight size={15} />
+                </button>
+              </div>
+              <h3 className="font-semibold text-sm mt-6 flex gap-2 items-center">
+                <Users size={17} />
+                People & role evidence
+              </h3>
+              <p className="dm-caption mt-2">
+                Roles belong to this buying need. The same person can play a
+                different role for another purchase.
+              </p>
+              <div className="divide-y mt-4">
+                {committeeMembers.map((member) => (
+                  <article key={member.id} className="py-5">
+                    <div className="flex justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-sm">{member.name}</p>
+                        <p className="dm-caption">{member.title}</p>
+                      </div>
                       <span
-                        className={`text-[9px] px-1 py-0.2 rounded border font-bold ${
-                          member.sentiment === 'CHAMPION' || member.sentiment === 'positive'
-                            ? 'bg-emerald-950 border-emerald-500/40 text-emerald-300'
-                            : member.sentiment === 'SUPPORTIVE' || member.sentiment === 'neutral'
-                            ? 'bg-cyan-950 border-cyan-500/40 text-cyan-300'
-                            : 'bg-rose-950 border-rose-500/40 text-rose-400'
-                        }`}
+                        className={`dm-badge h-fit ${member.status === "active" ? "" : "dm-badge-amber"}`}
                       >
-                        {member.sentiment}
+                        {member.status === "active"
+                          ? "Counts for coverage"
+                          : "Not counted"}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400">{member.title}</p>
-                    <span className="text-[10px] text-cyan-400/80 block">
-                      ROLE: {member.role.replace('_', ' ').toUpperCase()}
-                    </span>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    <span className="text-xs font-bold text-cyan-300 block">
-                      {member.engagementScore} PTS
-                    </span>
-                    <span className="text-[9px] text-slate-500">{member.influenceLevel} INFL</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Missing Roles Warning */}
-            {acc.committee.missingRoles.length > 0 && (
-              <div className="p-2 rounded bg-amber-950/30 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                  GAP WARNING: Missing critical roles:{' '}
-                  {acc.committee.missingRoles.map((r) => r.replace('_', ' ').toUpperCase()).join(', ')}
-                </span>
-                <span className="text-[10px] text-slate-400">Playbook: Dispatch Multi-Thread Campaign</span>
+                    <div className="flex flex-wrap gap-2 items-center mt-3">
+                      <strong className="text-sm">
+                        {member.role === "unknown"
+                          ? "Role not established"
+                          : overrideRoles.find(
+                              (role) => role.id === member.role,
+                            )?.name || member.role.replaceAll("_", " ")}
+                      </strong>
+                      <span className="dm-badge">{inferenceLabel(member)}</span>
+                      {member.roleSource?.startsWith("jev") &&
+                        (member.roleConfidence || 0) > 0 && (
+                          <span className="dm-caption">
+                            {Math.round((member.roleConfidence || 0) * 100)}%
+                            model confidence
+                          </span>
+                        )}
+                    </div>
+                    {member.roleInference?.status === "uncertain" &&
+                      member.roleInference.suggested_role &&
+                      member.roleInference.suggested_role !== "unknown" && (
+                        <p className="dm-caption mt-2">
+                          Possible {member.roleInference.suggested_role} ·
+                          evidence not strong enough for coverage
+                        </p>
+                      )}
+                    <div className="dm-committee-evidence">
+                      <p>{member.keyNotes}</p>
+                      <p>{member.coverageReason}</p>
+                      {member.roleInference?.reason && (
+                        <p>{member.roleInference.reason}</p>
+                      )}
+                      <p>
+                        Last engagement:{" "}
+                        {member.lastSeen &&
+                        !Number.isNaN(Date.parse(member.lastSeen)) &&
+                        new Date(member.lastSeen).getFullYear() > 1970
+                          ? new Date(member.lastSeen).toLocaleDateString()
+                          : "Not recorded"}
+                      </p>
+                      {member.roleInference?.evaluated_at && (
+                        <p>
+                          Evaluated:{" "}
+                          {new Date(
+                            member.roleInference.evaluated_at,
+                          ).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    {owner && member.email && (
+                      <details className="dm-committee-override">
+                        <summary>
+                          Optional owner correction <ChevronDown size={14} />
+                        </summary>
+                        <p className="dm-caption my-2">
+                          Automatic inference is the default. An evidence-backed
+                          owner override is preserved on future imports.
+                        </p>
+                        <button
+                          className="dm-text-button"
+                          onClick={() => {
+                            setVerification({
+                              email: member.email,
+                              role: overrideRoles.some(
+                                (r) => r.id === member.role,
+                              )
+                                ? member.role
+                                : "influencer",
+                            });
+                            setConfirmed(false);
+                          }}
+                        >
+                          Correct this role
+                        </button>
+                      </details>
+                    )}
+                  </article>
+                ))}
               </div>
-            )}
-          </div>
-        ))}
+              {!selected.committee.members.length && (
+                <p className="dm-empty">
+                  No contacts yet. Connect or import first-party contacts and
+                  activities; Dual Motion maps the committee as evidence
+                  arrives.
+                </p>
+              )}
+              {verification && (
+                <form
+                  className="rounded-lg border p-4 mt-4 space-y-4 bg-[#f8faff]"
+                  onSubmit={verify}
+                >
+                  <h3 className="font-semibold text-sm">
+                    Owner correction for {verification.email}
+                  </h3>
+                  <label className="dm-field">
+                    Evidence-backed role
+                    <select
+                      className="dm-input"
+                      value={verification.role}
+                      onChange={(e) =>
+                        setVerification({
+                          ...verification,
+                          role: e.target.value,
+                        })
+                      }
+                    >
+                      {overrideRoles.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex gap-3 text-sm leading-6">
+                    <input
+                      className="mt-1 w-4 h-4"
+                      type="checkbox"
+                      checked={confirmed}
+                      onChange={(e) => setConfirmed(e.target.checked)}
+                    />
+                    I verified this person's role using first-party evidence.
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="dm-button dm-button-primary"
+                      disabled={saving || !confirmed}
+                    >
+                      {saving ? "Saving…" : "Save owner correction"}
+                    </button>
+                    <button
+                      className="dm-button"
+                      type="button"
+                      disabled={saving}
+                      onClick={() => setVerification(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          ) : (
+            <p className="dm-empty">
+              Select a demand unit to review its buying group.
+            </p>
+          )}
+        </section>
       </div>
     </div>
   );

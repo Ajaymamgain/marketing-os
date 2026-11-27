@@ -1,303 +1,189 @@
 import React, { useState } from 'react';
-import {
-  Filter,
-  Layers,
-  ArrowDown,
-  TrendingUp,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  Zap,
-  Cpu,
-  Sparkles,
-} from 'lucide-react';
 import { AccountDemandUnit, FunnelStage } from '../types';
-import { playCadClick } from '../utils/audio';
 
-interface DemandFunnelViewProps {
+interface Props {
   accounts: AccountDemandUnit[];
   onSelectAccount: (account: AccountDemandUnit) => void;
 }
 
-interface FunnelStepInfo {
+interface Step {
   stage: FunnelStage;
   name: string;
   count: number;
-  valueUsd: number;
-  conversionPct: number;
-  avgDaysInStage: number;
-  plgContributionPct: number;
-  slgContributionPct: number;
-  diagnostics: string;
-  status: 'OPTIMAL' | 'BOTTLENECK' | 'HEALTHY';
+  description: string;
 }
 
-export const DemandFunnelView: React.FC<DemandFunnelViewProps> = ({
-  accounts,
-  onSelectAccount,
-}) => {
-  const [selectedStage, setSelectedStage] = useState<FunnelStage | 'ALL'>('ALL');
+const stageDefinitions: Omit<Step, 'count'>[] = [
+  { stage: 'target', name: 'Tracked', description: 'Every demand unit currently in this workspace.' },
+  { stage: 'engaged', name: 'Engaged or later', description: 'Units whose current stage is Engaged or later.' },
+  { stage: 'prioritized_du', name: 'Prioritized or later', description: 'Units whose current stage is Prioritized or later.' },
+  { stage: 'qualified_du', name: 'Qualified or later', description: 'Units whose current stage is Qualified or later.' },
+  { stage: 'pipeline_deal', name: 'Pipeline or later', description: 'Units whose current stage is Pipeline or later.' },
+  { stage: 'closed_won', name: 'Closed won or later', description: 'Units whose current stage is Closed Won or Expansion.' },
+  { stage: 'expansion', name: 'Expansion', description: 'Units currently in an expansion stage.' },
+];
 
-  const funnelSteps: FunnelStepInfo[] = [
-    {
-      stage: 'target',
-      name: '01 // TARGET ICP ACCOUNTS',
-      count: 2450,
-      valueUsd: 196000000,
-      conversionPct: 100,
-      avgDaysInStage: 0,
-      plgContributionPct: 50,
-      slgContributionPct: 50,
-      diagnostics: 'Firmographic ICP filter: 1k-15k headcount, cloud kubernetes tech footprint.',
-      status: 'HEALTHY',
-    },
-    {
-      stage: 'engaged',
-      name: '02 // ENGAGED DEMAND UNITS',
-      count: 720,
-      valueUsd: 64800000,
-      conversionPct: 29.3,
-      avgDaysInStage: 12,
-      plgContributionPct: 62,
-      slgContributionPct: 38,
-      diagnostics: 'Self-serve sandbox created or website whitepaper / technical doc session logged.',
-      status: 'HEALTHY',
-    },
-    {
-      stage: 'prioritized_du',
-      name: '03 // PRIORITIZED DEMAND UNITS',
-      count: 240,
-      valueUsd: 28800000,
-      conversionPct: 33.3,
-      avgDaysInStage: 9,
-      plgContributionPct: 58,
-      slgContributionPct: 42,
-      diagnostics: 'Dual-motion composite score crossed 70 threshold with >2 team members active.',
-      status: 'OPTIMAL',
-    },
-    {
-      stage: 'qualified_du',
-      name: '04 // QUALIFIED DEMAND UNITS (PQL/SQL)',
-      count: 98,
-      valueUsd: 17640000,
-      conversionPct: 40.8,
-      avgDaysInStage: 15,
-      plgContributionPct: 45,
-      slgContributionPct: 55,
-      diagnostics: 'Champion confirmed + economic buyer aligned. Commercial viability established.',
-      status: 'BOTTLENECK',
-    },
-    {
-      stage: 'pipeline_deal',
-      name: '05 // FORMAL PIPELINE / PROPOSAL',
-      count: 46,
-      valueUsd: 9200000,
-      conversionPct: 46.9,
-      avgDaysInStage: 21,
-      plgContributionPct: 30,
-      slgContributionPct: 70,
-      diagnostics: 'Pricing proposal delivered, security CAIQ package in review with InfoSec.',
-      status: 'HEALTHY',
-    },
-    {
-      stage: 'closed_won',
-      name: '06 // CLOSED-WON CONTRACT',
-      count: 28,
-      valueUsd: 5600000,
-      conversionPct: 60.8,
-      avgDaysInStage: 14,
-      plgContributionPct: 35,
-      slgContributionPct: 65,
-      diagnostics: 'MSA executed, automated SSO provisioning active.',
-      status: 'OPTIMAL',
-    },
-    {
-      stage: 'expansion',
-      name: '07 // LAND & EXPAND TELEMETRY',
-      count: 19,
-      valueUsd: 4200000,
-      conversionPct: 67.8,
-      avgDaysInStage: 45,
-      plgContributionPct: 75,
-      slgContributionPct: 25,
-      diagnostics: 'Adjacent department seat saturation triggered automated expansion addendum.',
-      status: 'OPTIMAL',
-    },
-  ];
+const count = (value: number) => value.toLocaleString();
+const percent = (value: number) => `${value.toFixed(1)}%`;
 
-  const matchingAccounts = accounts.filter((acc) =>
-    selectedStage === 'ALL' ? true : acc.stage === selectedStage
-  );
+export const DemandFunnelView: React.FC<Props> = ({ accounts, onSelectAccount }) => {
+  const [selectedStage, setSelectedStage] = useState<FunnelStage>('prioritized_du');
+  const [showAll, setShowAll] = useState(false);
+  const stageOrder = stageDefinitions.map((step) => step.stage);
+  const steps: Step[] = stageDefinitions.map((step, index) => ({
+    ...step,
+    count: accounts.filter((account) => stageOrder.indexOf(account.stage) >= index).length,
+  }));
+  const selectedIndex = Math.max(0, steps.findIndex((step) => step.stage === selectedStage));
+  const selected = steps[selectedIndex];
+  const previous = steps[selectedIndex - 1];
+  const exactCounts = steps.map((step, index) => step.count - (steps[index + 1]?.count ?? 0));
+  const liveInStage = accounts.filter((account) => account.stage === selectedStage);
+  const visibleAccounts = showAll ? accounts : liveInStage;
+  const fictionalSampleCount = accounts.filter((account) => account.domain.endsWith('.example')).length;
+  const tracked = steps[0]?.count ?? 0;
 
   return (
-    <div className="space-y-6 animate-fadeIn font-mono">
-      {/* View Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cyan-500/20 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 border border-cyan-400/40 text-cyan-300 font-bold">
-              SYS.01 // WATERFALL FUNNEL
-            </span>
-            <span className="text-xs text-slate-400">DEMAND UNIT VELOCITY &amp; CONVERSION DIAGNOSTICS</span>
+    <div className="mx-auto flex max-w-[1200px] flex-col gap-4">
+      <header className="px-1">
+        <h1 className="text-[22px] font-semibold tracking-tight text-[#1c1f26]">Demand funnel</h1>
+        <p className="mt-1 max-w-[68ch] text-[13px] leading-5 text-[#6b7280]">
+          Current stage snapshot. Bar length is the share of tracked units at that stage or later, not a measured conversion rate.
+          {fictionalSampleCount > 0 ? ` ${fictionalSampleCount} units use fictional .example domains.` : ''}
+        </p>
+      </header>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Workspace funnel summary">
+        {[
+          { label: 'Tracked units', value: count(tracked), detail: 'All current stages' },
+          { label: 'Prioritized or later', value: count(steps[2]?.count ?? 0), detail: 'At or beyond priority' },
+          { label: 'Qualified or later', value: count(steps[3]?.count ?? 0), detail: 'At or beyond qualification' },
+          { label: 'Closed won or later', value: count(steps[5]?.count ?? 0), detail: 'At or beyond won' },
+        ].map((metric) => (
+          <article key={metric.label} className="hex-cell">
+            <p className="hex-label">{metric.label}</p>
+            <p className="hex-figure">{metric.value}</p>
+            <p className="hex-note">{metric.detail}</p>
+          </article>
+        ))}
+      </section>
+
+      <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,0.85fr)]">
+        <section className="hex-cell" aria-labelledby="funnel-heading">
+          <div className="mb-4 flex items-baseline justify-between gap-3">
+            <h2 id="funnel-heading" className="text-[14px] font-semibold text-[#1c1f26]">Volume by stage</h2>
+            <span className="text-[12px] text-[#9ca3af]">Share of tracked units</span>
           </div>
-          <h2 className="text-xl font-bold text-white tracking-tight mt-1">
-            Dual-Motion Demand Waterfall Funnel
-          </h2>
-          <p className="text-xs text-slate-400">
-            Measures stage-by-stage progression from cold ICP target to Closed-Won and Expansion.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs">
-          <span className="px-2.5 py-1 rounded bg-[#081322] border border-cyan-500/30 text-cyan-300">
-            TOTAL CONVERSION EFFICIENCY: 14.8%
-          </span>
-          <span className="px-2.5 py-1 rounded bg-[#081322] border border-amber-500/30 text-amber-300">
-            1 STAGE BOTTLENECK DETECTED
-          </span>
-        </div>
-      </div>
-
-      {/* Stage Flow Waterfall Diagnostic Bar */}
-      <div className="space-y-3">
-        {funnelSteps.map((step, idx) => {
-          const isSelected = selectedStage === step.stage;
-          const widthPct = Math.max(15, (step.count / funnelSteps[0].count) * 100);
-
-          return (
-            <div
-              key={step.stage}
-              onClick={() => {
-                playCadClick();
-                setSelectedStage(isSelected ? 'ALL' : step.stage);
-              }}
-              className={`p-3.5 rounded border transition-all cursor-pointer relative ${
-                isSelected
-                  ? 'bg-cyan-950/70 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]'
-                  : 'bg-[#081220] border-cyan-500/25 hover:border-cyan-500/50 hover:bg-[#0a172a]'
-              }`}
-            >
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-2">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-xs font-bold text-white">{step.name}</span>
-                  <span
-                    className={`text-[10px] px-1.5 py-0.2 rounded border font-bold ${
-                      step.status === 'BOTTLENECK'
-                        ? 'bg-amber-950/70 border-amber-500/40 text-amber-300'
-                        : step.status === 'OPTIMAL'
-                        ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
-                        : 'bg-cyan-950/70 border-cyan-500/30 text-cyan-300'
-                    }`}
-                  >
-                    {step.status}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-4 text-xs">
-                  <div>
-                    <span className="text-slate-400 text-[10px]">UNITS: </span>
-                    <span className="text-cyan-300 font-bold">{step.count.toLocaleString()}</span>
+          <div className="flex flex-col">
+            {steps.map((step, index) => {
+              const isSelected = selected.stage === step.stage;
+              const share = tracked ? (step.count / tracked) * 100 : 0;
+              return (
+                <button
+                  key={step.stage}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    setSelectedStage(step.stage);
+                    setShowAll(false);
+                  }}
+                  className={`rounded-md px-3 py-2.5 text-left ${isSelected ? 'bg-[#eef3ff]' : 'hover:bg-[#f7f8fa]'}`}
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className={`text-[13px] ${isSelected ? 'font-semibold text-[#1d4ed8]' : 'font-medium text-[#1c1f26]'}`}>
+                      {step.name}
+                    </span>
+                    <span className="text-[13px] font-semibold tabular-nums text-[#1c1f26]">{count(step.count)}</span>
                   </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px]">PIPELINE: </span>
-                    <span className="text-white font-bold">${(step.valueUsd / 1000000).toFixed(1)}M</span>
-                  </div>
-                  {idx > 0 && (
-                    <div>
-                      <span className="text-slate-400 text-[10px]">CONV: </span>
-                      <span className="text-emerald-400 font-bold">{step.conversionPct}%</span>
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#e6e8ee]" role="img" aria-label={`${percent(share)} of tracked units`}>
+                      <div className="h-full rounded-full bg-[#1d4ed8]" style={{ width: `${share}%` }} />
                     </div>
-                  )}
-                  <div>
-                    <span className="text-slate-400 text-[10px]">AVG DAYS: </span>
-                    <span className="text-amber-300 font-bold">{step.avgDaysInStage}d</span>
+                    <span className="w-12 text-right text-[12px] tabular-nums text-[#6b7280]">{percent(share)}</span>
                   </div>
-                </div>
-              </div>
+                  <p className="mt-1 text-[12px] text-[#6b7280]">{count(exactCounts[index])} at this stage</p>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
-              {/* Progress visualizer & motion split */}
-              <div className="space-y-1.5">
-                <div className="w-full h-2.5 bg-slate-900 rounded-sm overflow-hidden flex">
-                  <div
-                    className="h-full bg-cyan-400 transition-all duration-500"
-                    style={{ width: `${(widthPct * step.plgContributionPct) / 100}%` }}
-                    title={`PLG Velocity: ${step.plgContributionPct}%`}
-                  />
-                  <div
-                    className="h-full bg-indigo-400 transition-all duration-500"
-                    style={{ width: `${(widthPct * step.slgContributionPct) / 100}%` }}
-                    title={`SLG Committee: ${step.slgContributionPct}%`}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between text-[10px] text-slate-400">
-                  <span className="text-slate-300">{step.diagnostics}</span>
-                  <span className="shrink-0 ml-2">
-                    MOTION CONTRIBUTION: <span className="text-cyan-300">PLG {step.plgContributionPct}%</span> /{' '}
-                    <span className="text-indigo-300">SLG {step.slgContributionPct}%</span>
-                  </span>
-                </div>
-              </div>
+        <aside className="hex-cell xl:sticky xl:top-4" aria-label="Selected stage details">
+          <p className="hex-label">Selected stage</p>
+          <h2 className="mt-2 text-[18px] font-semibold tracking-tight text-[#1c1f26]">{selected.name}</h2>
+          <p className="mt-1 text-[13px] leading-5 text-[#6b7280]">{selected.description}</p>
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-[#eef0f3] pt-4">
+            <div>
+              <dt className="text-[12px] text-[#6b7280]">At this stage or later</dt>
+              <dd className="mt-1 text-[20px] font-semibold tabular-nums text-[#1c1f26]">{count(selected.count)}</dd>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Filtered Stage Accounts Inspector */}
-      <div className="p-4 rounded bg-[#081220] border border-cyan-500/25 space-y-3">
-        <div className="flex items-center justify-between border-b border-cyan-900/30 pb-2">
-          <h3 className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-cyan-400" />
-            ACCOUNTS IN STAGE: {selectedStage.toUpperCase()} ({matchingAccounts.length})
-          </h3>
-          {selectedStage !== 'ALL' && (
-            <button
-              onClick={() => {
-                playCadClick();
-                setSelectedStage('ALL');
-              }}
-              className="text-xs text-cyan-400 hover:text-cyan-200 cursor-pointer"
-            >
-              SHOW ALL STAGES
-            </button>
+            <div>
+              <dt className="text-[12px] text-[#6b7280]">Exactly this stage</dt>
+              <dd className="mt-1 text-[20px] font-semibold tabular-nums text-[#1c1f26]">{count(liveInStage.length)}</dd>
+            </div>
+            <div>
+              <dt className="text-[12px] text-[#6b7280]">Share of tracked</dt>
+              <dd className="mt-1 text-[16px] font-semibold tabular-nums text-[#1c1f26]">{tracked ? percent((selected.count / tracked) * 100) : '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-[12px] text-[#6b7280]">Share of prior step</dt>
+              <dd className="mt-1 text-[16px] font-semibold tabular-nums text-[#1c1f26]">{previous?.count ? percent((selected.count / previous.count) * 100) : '—'}</dd>
+            </div>
+          </dl>
+          {selected.stage === 'qualified_du' && (
+            <p className="mt-4 text-[12px] leading-5 text-[#6b7280]">
+              Coverage 0 blocks A1, Engaged, the 4-hour SLA, and persona discovery.
+            </p>
           )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {matchingAccounts.map((acc) => (
-            <div
-              key={acc.id}
-              onClick={() => {
-                playCadClick();
-                onSelectAccount(acc);
-              }}
-              className="p-3 rounded bg-[#070e1a] border border-cyan-950 hover:border-cyan-500/40 transition-colors cursor-pointer flex items-center justify-between gap-3 group"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-white group-hover:text-cyan-300 transition-colors">
-                    {acc.accountName}
-                  </span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-500/30 text-cyan-300">
-                    {acc.primaryMotion}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">{acc.solutionTarget}</p>
-                <div className="text-[10px] text-slate-500 mt-1">
-                  STAGE: {acc.stage.toUpperCase()} • ${(acc.estDealValue / 1000).toFixed(0)}k ARR
-                </div>
-              </div>
-
-              <div className="text-right">
-                <span className="text-base font-bold text-cyan-300 block">{acc.compositeScore}</span>
-                <span className="text-[10px] text-amber-300">
-                  {acc.committee.coverageScore}% Committee
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+        </aside>
       </div>
+
+      <section className="hex-cell overflow-hidden p-0" aria-labelledby="live-units-heading">
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <h2 id="live-units-heading" className="text-[14px] font-semibold text-[#1c1f26]">
+            {showAll ? 'All demand units' : selected.name}
+          </h2>
+          <button
+            type="button"
+            onClick={() => setShowAll((value) => !value)}
+            className="text-[12px] font-medium text-[#1d4ed8] hover:underline"
+          >
+            {showAll ? 'Show this stage' : `Show all ${accounts.length}`}
+          </button>
+        </div>
+        {visibleAccounts.length === 0 ? (
+          <p className="border-t border-[#eef0f3] px-4 py-10 text-center text-[13px] text-[#6b7280]">
+            No demand units are currently in this stage.
+          </p>
+        ) : (
+          <div className="overflow-x-auto border-t border-[#eef0f3]">
+            <table className="w-full min-w-[560px] text-left">
+              <thead>
+                <tr className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#9ca3af]">
+                  <th className="px-4 py-2 font-medium">Account</th>
+                  <th className="px-3 py-2 font-medium">Need</th>
+                  <th className="px-3 py-2 text-right font-medium">Coverage</th>
+                  <th className="px-4 py-2 text-right font-medium">Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleAccounts.map((account) => (
+                  <tr
+                    key={account.id}
+                    onClick={() => onSelectAccount(account)}
+                    className="cursor-pointer border-t border-[#eef0f3] hover:bg-[#f7f8fa]"
+                  >
+                    <td className="px-4 py-3 text-[13px] font-medium text-[#1c1f26]">{account.accountName}</td>
+                    <td className="px-3 py-3 text-[13px] text-[#3f4450]">{account.solutionTarget}</td>
+                    <td className="px-3 py-3 text-right text-[13px] tabular-nums text-[#1c1f26]">{account.committee.coverageScore}%</td>
+                    <td className="px-4 py-3 text-right text-[14px] font-semibold tabular-nums text-[#1c1f26]">{account.compositeScore}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 };

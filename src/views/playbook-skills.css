@@ -1,0 +1,26 @@
+.pb-skill-panel .dm-section-heading { align-items:start; flex-wrap:wrap; gap:12px; }
+.pb-skill-panel .dm-section-heading .dm-muted { margin-top:5px; }
+.pb-skill-connection { border:1px solid #dce4ee; border-radius:9px; padding:16px; margin-top:14px; }
+.pb-skill-heading { display:flex; align-items:start; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.pb-skill-heading .dm-badge { display:inline-flex; align-items:center; gap:5px; }
+.pb-skill-heading h3 { font-size:15px; }
+.pb-skill-connection .dm-muted { margin:6px 0; }
+.pb-skill-details { margin-top:10px; }
+.pb-skill-details summary { display:flex; width:fit-content; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:600; }
+.pb-skill-details summary::before { content:'›'; color:#34577a; padding-right:2px; }
+.pb-skill-details[open] summary::before { transform:rotate(90deg); }
+.pb-skill-details dl { margin-top:8px; }
+.pb-skill-details dl div { display:grid; grid-template-columns:minmax(120px, 1fr) minmax(0, 3fr); padding:7px 0; gap:12px; border-bottom:1px solid #e7edf3; font-size:13px; }
+.pb-skill-details dd { overflow-wrap:anywhere; }
+.pb-skill-details ul { padding:0; list-style:none; margin:7px 0 0; }
+.pb-skill-details li { border-bottom:1px solid #e7edf3; padding:9px 0; font-size:13px; }
+.pb-skill-details li strong { text-transform:capitalize; }
+.pb-skill-actions { display:flex; align-items:center; gap:8px 12px; flex-wrap:wrap; margin-top:12px; }
+.pb-receipt-table { overflow-x:auto; }
+.pb-receipt-table table { width:100%; border-collapse:collapse; min-width:560px; text-align:left; font-size:13px; }
+.pb-receipt-table :is(th,td) { padding:9px 10px; border-bottom:1px solid #e7edf3; }
+.pb-receipt-table :is(th,td):nth-child(n+4) { text-align:right; font-variant-numeric:tabular-nums; }
+.pb-receipt-table small { display:block; color:var(--dm-muted); margin-top:3px; }
+.pb-mapping-buttons { display:flex; flex-wrap:wrap; gap:8px; }
+.pb-list-input { width:100%; height:40px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; margin-top:6px; }
+.pb-procedure { margin:10px 0 14px; padding:12px; white-space:pre-wrap; overflow-wrap:anywhere; background:#f4f7fa; border-radius:7px; font:inherit; font-size:13px; line-height:1.55; color:var(--dm-muted); }

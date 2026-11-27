@@ -1,194 +1,117 @@
-import React, { useState } from 'react';
-import {
-  Network,
-  RefreshCw,
-  Database,
-  Cloud,
-  Radio,
-  Server,
-  Activity,
-  Sparkles,
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, CheckCircle2, ChevronRight, Clock3, ExternalLink, Loader2, Plug, Plus, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
+import { ApiDecisionsControl } from '../components/ApiDecisionsControl';
 import { DataConnector } from '../types';
-import { playCadClick, playCadConfirm } from '../utils/audio';
+import { validateMcpJson,saveMcpJson,approveMcpReadTools,fetchMcpTools,McpToolDefinition,saveMcpServer,configureMarketo, connectMcpConnector, disconnectMarketo, disconnectMcpConnector, fetchWorkspaceAccess, getConnectorInventory, saveMcpConnector, syncMarketo } from '../services/api';
 
-interface DataConnectorsViewProps {
-  connectors: DataConnector[];
-}
+interface Props { connectors: DataConnector[]; onApplied?: () => void }
+const MARKETO_FORM = { rest_url: '', identity_url: '', client_id: '', client_secret: '' };
+const ENDPOINT_FORM = { server_url: '', header_name: 'Authorization', header_value: '', documentation_url: '' };
+const Logo = ({id}:{id:string}) => id==='parallel' ? <img src="/assets/provider-logos/parallel.svg" alt="" width={30} height={30}/> : id.startsWith("custom") ? <Plug size={23}/> : <img src={`/assets/provider-logos/${id}.png`} alt="" width={30} height={30} />;
+const knownProviders = [
+  { id:'parallel',name:'Parallel AI',category:'Research',monogram:'P',color:'#21353a',description:'Cited public company research and professional-role evidence.',detail:'Search MCP discovers official company sources. Extraction returns supporting passages for reviewed enrichment. This service is configured on the backend; research does not automatically verify people or change scores. Automatic decisions must be on and the operations worker ready to run enrichment workflows.',docs:'https://docs.parallel.ai/integrations/mcp/search-mcp' },
+  { id: 'marketo', name: 'Marketo Engage', category: 'Marketing', monogram: 'm', color: '#6c43ab', description: 'Leads, programs, lists and identified activity for demand scoring.', detail: 'The Marketo adapter imports mapped lead activity and records sync outcomes. Program mappings are required to connect that activity to a business need.', docs: 'https://experienceleague.adobe.com/en/docs/marketo-developer/marketo/mcp-server' },
+  { id: 'salesforce', name: 'Salesforce', category: 'CRM', monogram: 'sf', color: '#087eaa', description: 'Account, contact and opportunity context for your buying groups.', detail: 'A remote tool endpoint can be saved and tested. The native Salesforce ingestion adapter is planned; endpoint verification does not establish a running data sync.', docs: 'https://developer.salesforce.com/docs' },
+  { id: 'google_ads', name: 'Google Ads', category: 'Advertising', monogram: 'G', color: '#4285f4', description: 'Campaign performance, audience lists and conversion reporting.', detail: 'Native campaign ingestion and audience delivery are planned. Aggregate spend, impressions and clicks remain campaign reporting; they do not identify an account or buyer by themselves.', docs: 'https://developers.google.com/google-ads/api/docs/first-app/overview' },
+  { id: 'meta_ads', name: 'Meta Ads', category: 'Advertising', monogram: '∞', color: '#0866ff', description: 'Facebook and Instagram campaign and audience reporting.', detail: 'Native ingestion and Custom Audience delivery are planned. Campaign totals can inform campaign segments, but cannot establish individual engagement, identity or consent.', docs: 'https://developers.facebook.com/docs/marketing-apis' },
+  { id: 'linkedin_ads', name: 'LinkedIn Ads', category: 'Advertising', monogram: 'in', color: '#0a66c2', description: 'Campaign, matched audience and lead generation context.', detail: 'Native ingestion and Matched Audience delivery are planned. Lead-form records require verified identity mapping; aggregate ad reporting does not identify an individual buyer.', docs: 'https://learn.microsoft.com/en-us/linkedin/marketing' },
+];
+const categories = ['All providers', 'Marketing', 'CRM', 'Advertising', 'Research'];
+const dateLabel = (value?: string) => value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not recorded';
 
-export const DataConnectorsView: React.FC<DataConnectorsViewProps> = ({
-  connectors: initialConnectors,
-}) => {
-  const [connectors, setConnectors] = useState(initialConnectors);
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [logMessage, setLogMessage] = useState<string | null>(null);
-
-  const handleSync = (id: string) => {
-    playCadClick();
-    setSyncingId(id);
-    const conn = connectors.find((c) => c.id === id);
-
-    setTimeout(() => {
-      playCadConfirm();
-      setSyncingId(null);
-      setConnectors((prev) =>
-        prev.map((c) =>
-          c.id === id ? { ...c, lastSync: 'Just now', status: 'SYNCHRONIZED' } : c
-        )
-      );
-      setLogMessage(`Telemetry stream verified: [${conn?.name}] synced ${Math.floor(Math.random() * 400 + 100)}k events.`);
-      setTimeout(() => setLogMessage(null), 4000);
-    }, 900);
-  };
-
-  const getIcon = (category: string) => {
-    switch (category) {
-      case 'PRODUCT_ANALYTICS':
-        return Activity;
-      case 'DATA_WAREHOUSE':
-        return Database;
-      case 'CRM':
-        return Cloud;
-      case 'INTENT_STREAM':
-        return Radio;
-      default:
-        return Server;
-    }
-  };
-
-  return (
-    <div className="space-y-6 animate-fadeIn font-mono">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cyan-500/20 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 border border-cyan-400/40 text-cyan-300 font-bold">
-              SYS.01 // TELEMETRY MESH
-            </span>
-            <span className="text-xs text-slate-400">DATA CONNECTORS &amp; INGESTION TOPOLOGY</span>
-          </div>
-          <h2 className="text-xl font-bold text-white tracking-tight mt-1">
-            Data Connectors &amp; Real-Time Telemetry Mesh
-          </h2>
-          <p className="text-xs text-slate-400">
-            Bidirectional sync between product usage telemetry, enterprise CRM, and 3P intent providers.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs">
-          <span className="px-2.5 py-1 rounded bg-[#081220] border border-emerald-500/30 text-emerald-300">
-            MESH STATUS: ALL NODES SYNCHRONIZED
-          </span>
-        </div>
-      </div>
-
-      {logMessage && (
-        <div className="p-3 rounded bg-emerald-950/80 border border-emerald-400/50 text-emerald-300 text-xs flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <span>{logMessage}</span>
-        </div>
-      )}
-
-      {/* Mesh Architecture Diagram */}
-      <div className="p-4 rounded bg-[#081220] border border-cyan-500/30 space-y-3">
-        <span className="text-xs font-bold text-cyan-300 flex items-center gap-2">
-          <Network className="w-4 h-4 text-cyan-400" />
-          TELEMETRY MESH INGESTION TOPOLOGY
-        </span>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-          <div className="p-3 rounded bg-[#070e1a] border border-cyan-950 space-y-1">
-            <span className="text-cyan-400 font-bold text-[11px] block">LAYER 1: RAW INGESTION</span>
-            <p className="text-slate-400 text-[11px]">
-              Kafka events &amp; Segment webhooks capture seat additions, API volume, and CLI homebrew installations.
-            </p>
-            <span className="text-[10px] text-slate-500">Latency: &lt; 50ms</span>
-          </div>
-
-          <div className="p-3 rounded bg-[#070e1a] border border-cyan-950 space-y-1">
-            <span className="text-indigo-400 font-bold text-[11px] block">LAYER 2: SCORING ENGINE</span>
-            <p className="text-slate-400 text-[11px]">
-              Calculates dual-motion composite formula with 14-day exponential signal decay and committee weights.
-            </p>
-            <span className="text-[10px] text-slate-500">Processing: Continuous In-Memory</span>
-          </div>
-
-          <div className="p-3 rounded bg-[#070e1a] border border-cyan-950 space-y-1">
-            <span className="text-emerald-400 font-bold text-[11px] block">LAYER 3: CRM DISPATCH</span>
-            <p className="text-slate-400 text-[11px]">
-              Syncs prioritized demand units directly into Salesforce &amp; Slack alert channels for AE acceleration.
-            </p>
-            <span className="text-[10px] text-slate-500">Sync: Sub-second bidirectional</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Connectors Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {connectors.map((conn) => {
-          const category = conn.category || conn.type || 'EVENT_BUS';
-          const Icon = getIcon(category);
-          const isSyncing = syncingId === conn.id;
-          const rate = conn.eventsPerSec ? `${conn.eventsPerSec.toLocaleString()} evt/sec` : conn.eventsPerMin ? `${conn.eventsPerMin.toLocaleString()} evt/min` : 'Dynamic stream';
-
-          return (
-            <div
-              key={conn.id}
-              className="p-4 rounded bg-[#081220] border border-cyan-500/25 hover:border-cyan-400/40 transition-all space-y-3 flex flex-col justify-between"
-            >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded bg-cyan-950/70 border border-cyan-500/30 text-cyan-300">
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-white">{conn.name}</h4>
-                      <span className="text-[10px] text-slate-500">{category}</span>
-                    </div>
-                  </div>
-
-                  <span
-                    className={`text-[9px] px-1.5 py-0.2 rounded border font-bold ${
-                      conn.status === 'SYNCHRONIZED' || conn.status === 'SYNCED'
-                        ? 'bg-emerald-950 border-emerald-500/40 text-emerald-300'
-                        : conn.status === 'STREAMING'
-                        ? 'bg-cyan-950 border-cyan-500/40 text-cyan-300'
-                        : 'bg-amber-950 border-amber-500/40 text-amber-300'
-                    }`}
-                  >
-                    {conn.status}
-                  </span>
-                </div>
-
-                <div className="space-y-1 text-xs border-t border-slate-800/80 pt-2">
-                  <div className="flex justify-between text-slate-400 text-[11px]">
-                    <span>Ingestion Rate:</span>
-                    <span className="text-white font-bold">{rate}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-400 text-[11px]">
-                    <span>Pipeline Latency:</span>
-                    <span className="text-cyan-300">{conn.latencyMs} ms</span>
-                  </div>
-                  <div className="flex justify-between text-slate-400 text-[11px]">
-                    <span>Last Telemetry Sync:</span>
-                    <span className="text-slate-500">{conn.lastSync}</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => handleSync(conn.id)}
-                disabled={isSyncing}
-                className="w-full py-1.5 rounded bg-[#070e1a] hover:bg-[#0a1628] border border-cyan-500/30 hover:border-cyan-400 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-amber-400' : 'text-cyan-400'}`} />
-                <span>{isSyncing ? 'VERIFYING TELEMETRY...' : 'PING & TEST SYNC'}</span>
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+export const DataConnectorsView: React.FC<Props> = ({ connectors: initial, onApplied }) => {
+  const [connectors, setConnectors] = useState(initial);
+  const [loading, setLoading] = useState(true);
+  const [owner, setOwner] = useState(false);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('All providers');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [modal, setModal] = useState<'details'|'marketo'|'endpoint'|'add'|'disconnect'|'tools'|null>(null);
+  const [selected, setSelected] = useState('marketo');
+  const [marketoForm, setMarketoForm] = useState(MARKETO_FORM);
+  const [endpointForm, setEndpointForm] = useState(ENDPOINT_FORM);
+  const [headers,setHeaders]=useState([{name:'Authorization',value:''}]);
+  const [entryMode,setEntryMode]=useState<'fields'|'json'>('fields');
+  const [jsonConfig,setJsonConfig]=useState('');
+  const [jsonValidated,setJsonValidated]=useState('');
+  const [jsonResult,setJsonResult]=useState<{tool_count:number;server_url:string;header_names:string[]}|null>(null);
+  const [customName,setCustomName]=useState('');
+  const [tools,setTools]=useState<McpToolDefinition[]>([]);
+  const [approved,setApproved]=useState<string[]>([]);
+  const providers=[...knownProviders,...connectors.filter(c=>c.id.startsWith('custom_')).map(c=>({id:c.id,name:c.name,category:'MCP',monogram:'',color:'#51627c',description:'Workspace MCP server for approved operations tools.',detail:'Tools are discovered by verifying the saved endpoint. Only owner-approved read tools are available to the operations agent.',docs:''}))];
+  const dialog = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement|null>(null);
+  useEffect(() => { setConnectors(initial); }, [initial]);
+  useEffect(() => {
+    let active = true;
+    Promise.all([fetchWorkspaceAccess(), getConnectorInventory()]).then(([access, inventory]) => { if (active) { setOwner(access.role === 'owner'); setConnectors(inventory); } }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'Connections could not load.'); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => { setEntryMode('fields'); setJsonConfig(''); setJsonValidated(''); setJsonResult(null); }, [selected]);
+  const close = () => { if (!busy) { setModal(null); setMarketoForm(MARKETO_FORM); setEndpointForm(ENDPOINT_FORM);setHeaders([{name:'Authorization',value:''}]);setJsonConfig('');setJsonValidated('');setJsonResult(null);setEntryMode('fields'); } };
+  useEffect(() => {
+    if (!modal) return;
+    returnFocus.current = document.activeElement as HTMLElement;
+    const first = dialog.current?.querySelector<HTMLElement>('button, input, textarea, select, a[href]');
+    first?.focus();
+    return () => returnFocus.current?.focus();
+  }, [modal]);
+  async function act(action: () => Promise<string>, dismiss = false) {
+    setBusy(true); setError(''); setMessage('');
+    try { const text = await action(); setConnectors(await getConnectorInventory()); setMessage(text); if (dismiss) { setModal(null); setMarketoForm(MARKETO_FORM); setEndpointForm(ENDPOINT_FORM); setEntryMode('fields');setJsonConfig('');setJsonValidated('');setJsonResult(null);setHeaders([{name:'Authorization',value:''}]); } onApplied?.(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'The request could not complete.'); }
+    finally { setBusy(false); }
+  }
+  const provider = providers.find(p => p.id === selected) || {id:'custom',name:'Custom MCP server',category:'MCP',monogram:'',color:'#51627c',description:'Workspace MCP server',detail:'Verified remote tools for workspace operations.',docs:''};
+  const connection = connectors.find(c => c.id === selected);
+  const configured = (c?: DataConnector) => Boolean(c?.mcpConfigured);
+  const savedCount = connectors.filter(configured).length;
+  function openSetup(id: string) {
+    setError(''); setSelected(id);
+    const item = connectors.find(c => c.id === id);
+    if (id === 'marketo') { const rest = item?.restUrl || ''; setMarketoForm({ ...MARKETO_FORM, rest_url: rest, identity_url: rest.replace(/\/rest\/?$/, '/identity') }); setModal('marketo'); }
+    else { setHeaders((item?.mcpHeaderNames?.length?item.mcpHeaderNames:['Authorization']).map(name=>({name,value:''})));setEndpointForm({ ...ENDPOINT_FORM, server_url: item?.mcpServerUrl || '', header_name: item?.mcpHeaderNames?.[0] || 'Authorization', documentation_url: item?.mcpDocumentation || providers.find(p => p.id === id)!.docs }); setModal('endpoint'); }
+  }
+  function stateLabel(c?: DataConnector) {
+    if (loading) return 'Checking';
+    if (!c) return 'Unavailable';
+    return c.mcpConfigured ? c.mcpProbe?.ok ? 'Connected' : c.id==='parallel' ? 'Research configured' : 'Endpoint saved' : 'Not connected';
+  }
+  const visible = providers.filter(p => (category === 'All providers' || p.category === category) && `${p.name} ${p.description} ${p.category}`.toLowerCase().includes(query.toLowerCase().trim()));
+  const title = modal === 'add' ? 'Add a connection' : modal === 'disconnect' ? `Disconnect ${provider.name}?` : modal === 'marketo' ? 'Connect Marketo Engage' : modal === 'tools' ? `${provider.name} tools` : modal === 'endpoint' ? selected==='custom' ? 'Add custom MCP server' : `${provider.name} MCP server` : provider.name;
+  return <div className="dm-connections">
+    <div className="connections-heading"><div><p className="dm-eyebrow">Workspace</p><h1>Connections</h1><p>Verify the MCP servers that supply tools and skills to your playbooks.</p></div><button className="connection-button" onClick={() => void act(async () => 'Connection status refreshed.')} disabled={busy || loading}><RefreshCw size={15} className={busy ? 'animate-spin' : ''}/>Refresh</button></div>
+    {message && <div className="connections-message" role="status"><CheckCircle2 size={16}/><span>{message}</span><button aria-label="Dismiss message" onClick={() => setMessage('')}><X size={15}/></button></div>}
+    {error && !modal && <div className="connections-message is-error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15}/></button></div>}
+    <ApiDecisionsControl />
+    <section className="connections-owned" aria-label="Connection summary"><div><span className="connections-icon"><Plug size={20}/></span><div><h2>MCP connections</h2><p>{loading ? 'Checking saved connections…' : `${savedCount} configured · MCP endpoints stay private to your workspace`}</p></div></div><a href="#automation" className="connections-link">View automation<ArrowUpRight size={15}/></a></section>
+    <section aria-labelledby="data-providers-title">
+      <div className="connections-section-heading"><div><h2 id="data-providers-title">Data providers</h2><p>Connect a provider-approved MCP server. Verify tools and skills before granting workspace access.</p></div>{owner && <button className="connection-button" onClick={() => { setError(''); setModal('add'); }} disabled={busy}><Plus size={15}/>Add MCP connector</button>}</div>
+      <div className="connections-filters"><label className="connections-search"><Search size={16}/><input type="search" aria-label="Search data providers" placeholder="Search data providers" value={query} onChange={e => setQuery(e.target.value)}/></label><div className="connections-categories" role="group" aria-label="Provider categories">{categories.map(item => <button key={item} aria-pressed={category===item} onClick={() => setCategory(item)}>{item}</button>)}</div></div>
+      <div className="connections-providers">{visible.map(p => { const item = connectors.find(c => c.id === p.id); return <article key={p.id} className="connections-provider"><button className="connections-provider-info" onClick={() => { setSelected(p.id); setError(''); setModal('details'); }} aria-label={`View ${p.name} details`}><span className="connections-provider-logo" style={{ color:p.color }}><Logo id={p.id}/></span><span><strong>{p.name}</strong><span>{p.description}</span></span></button><div className="connections-provider-action"><span className={`connections-state ${configured(item) ? 'is-configured' : ''}`}>{configured(item) ? <CheckCircle2 size={13}/> : p.id !== 'marketo' ? <Clock3 size={13}/> : null}{stateLabel(item)}</span>{owner && <button className="connection-button" disabled={busy || loading} onClick={() => !configured(item)&&p.id!=='parallel' ? (setSelected(p.id),setError(''),setHeaders((item?.mcpHeaderNames?.length?item.mcpHeaderNames:p.id==='marketo'?['X-Marketo-Client-Id','X-Marketo-Client-Secret','X-Marketo-Munchkin-Id']:['Authorization']).map(name=>({name,value:''}))),setEndpointForm({...ENDPOINT_FORM,server_url:item?.mcpServerUrl||'',documentation_url:p.docs}),setModal('endpoint')) : (setSelected(p.id),setError(''),setModal('details'))}>{p.id==='parallel'?'View service':configured(item) ? 'Manage' : 'Connect'}<ChevronRight size={14}/></button>}</div></article>; })}</div>
+      {!visible.length && <div className="connections-empty"><Search size={23}/><h3>No providers found</h3><p>Try another name or category.</p><button className="connection-button" onClick={() => { setQuery(''); setCategory('All providers'); }}>Clear filters</button></div>}
+    </section>
+    <p className="connections-footnote"><ShieldCheck size={16}/>Audience changes require verified identity, consent and coverage. A saved endpoint does not start a data sync.</p>
+    {modal && <div className="connections-overlay" onClick={e => { if (e.target===e.currentTarget) close(); }}><div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" className="connections-dialog" onKeyDown={event => {
+      if (event.key==='Escape') { event.stopPropagation(); close(); }
+      if (event.key==='Tab') { const items = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href]') || []); const first=items[0], last=items.at(-1); if (event.shiftKey && document.activeElement===first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement===last) { event.preventDefault(); first?.focus(); } }
+    }}><div className="connections-dialog-header"><div><p>{modal === 'add' ? 'Data providers' : provider.category}</p><h2 id="connection-dialog-title">{title}</h2></div><button className="connection-icon-button" aria-label="Close connection details" onClick={close} disabled={busy}><X size={19}/></button></div><div className="connections-dialog-body">
+      {error && <p className="connections-dialog-error" role="alert">{error}</p>}
+      {modal==='add' && <><p>Add the MCP URL and authentication header supplied by your provider. Verification discovers tools; it does not automatically grant writes or import records.</p><div className="connections-add-list">{providers.filter(p=>p.id!=='parallel' && !p.id.startsWith('custom_')).map(p => <button key={p.id} onClick={() => { setSelected(p.id); setEndpointForm({ ...ENDPOINT_FORM,server_url:connectors.find(c=>c.id===p.id)?.mcpServerUrl || '',documentation_url:p.docs }); setHeaders((connectors.find(c=>c.id===p.id)?.mcpHeaderNames?.length?connectors.find(c=>c.id===p.id)!.mcpHeaderNames:p.id==='marketo'?['X-Marketo-Client-Id','X-Marketo-Client-Secret','X-Marketo-Munchkin-Id']:['Authorization'])!.map(name=>({name,value:''})));setModal('endpoint'); }}><span className="connections-provider-logo" style={{ color:p.color }}><Logo id={p.id}/></span><span><strong>{p.name}</strong><small>{'MCP server'}</small></span><ChevronRight size={16}/></button>)}<button className="connections-custom-button" onClick={()=>{setSelected('custom');setCustomName('');setHeaders([{name:'Authorization',value:''}]);setEndpointForm(ENDPOINT_FORM);setModal('endpoint');}}><Plus size={17}/>Add custom MCP server</button></div></>}
+      {modal==='details' && <><div className="connections-detail-intro"><span className="connections-provider-logo" style={{ color:provider.color }}><Logo id={provider.id}/></span><div><strong>{stateLabel(connection)}</strong><p>{provider.description}</p></div></div><p>{provider.detail}</p><dl className="connections-facts"><div><dt>Connection type</dt><dd>{connection?.mcpConfigured ? 'MCP server' : 'MCP server · not configured'}</dd></div><div><dt>Saved MCP endpoint</dt><dd>{connection?.mcpServerUrl || 'Not configured'}</dd></div><div><dt>Endpoint verification</dt><dd>{connection?.mcpConfigured && connection?.mcpProbe?.ok ? `${connection.mcpProbe.tool_count ?? 0} tools · checked ${dateLabel(connection.mcpProbe.checked_at)}` : 'Not verified'}</dd></div>{selected==='marketo' && <><div><dt>Optional API adapter</dt><dd>{connection?.status==='configured' ? 'Configured' : 'Not configured'}</dd></div><div><dt>Last recorded API sync</dt><dd>{dateLabel(connection?.lastSync)} · {connection?.lastSyncStatus?.replaceAll('_',' ') || 'No outcome recorded'} · {connection?.lastSyncRecords ?? 0} ingested</dd></div></>}</dl>{Boolean(connection?.mcpProbe?.skills?.length) && <section>
+        <h3>Published skills</h3><ul>{connection?.mcpProbe?.skills?.map(skill=><li key={skill.uri}><strong>{skill.name}</strong><p>{skill.description}</p></li>)}</ul>
+      </section>}{provider.docs && <a className="connections-link" href={provider.docs} target="_blank" rel="noopener noreferrer">Provider documentation<ExternalLink size={14}/></a>}{owner && <div className="connections-dialog-actions">{selected==='marketo' && connection?.status==='configured' && <button className="connection-button is-primary" disabled={busy} onClick={() => void act(async () => { const result=await syncMarketo(); return `Sync recorded: ${result.fetched_records ?? 0} records fetched, ${result.ingested_records ?? 0} ingested. Review mappings and outcomes under Automation.`; })}>{busy ? <Loader2 size={15} className="animate-spin"/> : <RefreshCw size={15}/>}Sync now</button>}{selected==='marketo' && <button className="connection-button" disabled={busy} onClick={() => { setEndpointForm({ ...ENDPOINT_FORM,server_url:connection?.mcpServerUrl || '',header_name:connection?.mcpHeaderNames?.[0] || 'X-Marketo-Client-Id',documentation_url:provider.docs });setHeaders((connection?.mcpHeaderNames?.length?connection.mcpHeaderNames:['X-Marketo-Client-Id','X-Marketo-Client-Secret','X-Marketo-Munchkin-Id']).map(name=>({name,value:''})));setModal('endpoint'); }}>Configure MCP server</button>}{selected!=='parallel'&&(selected!=='marketo'||connection?.status==='configured')&&<button className="connection-button" disabled={busy} onClick={() => openSetup(selected)}>{selected==='marketo' ? 'Update existing sync credentials' : 'Configure MCP server'}</button>}{selected==='parallel'&&<button className="connection-button" disabled={busy||!connection?.mcpConfigured} onClick={()=>void act(async()=>{const result=await connectMcpConnector('parallel',provider.docs);return `Parallel AI verified: ${result.tool_count??0} research tools. Enrichment runs through scoped research workflows.`;})}><RefreshCw size={15}/>Verify research connection</button>}{selected==='parallel'&&<p className="connections-footnote">Server settings: PARALLEL_API_KEY and PARALLEL_RESEARCH_ENABLED. Research is a shared backend service; provider keys stay private.</p>}{selected!=='parallel'&&connection?.mcpConfigured && <button className="connection-button" disabled={busy} onClick={()=>void act(async()=>{
+        const result=await connectMcpConnector(selected, provider.docs);
+        return `MCP verified · ${result.probe?.tool_count ?? 0} tools · ${result.probe?.skills?.length ?? 0} published skills`;
+      })}><RefreshCw size={15}/>Verify MCP</button>}
+      {selected==='marketo'&&<a href="#playbooks" className="connection-button" onClick={close}>Open playbook skills<ArrowUpRight size={14}/></a>}
+      {selected!=='parallel'&&connection?.mcpConfigured && connection?.mcpProbe?.ok && <button className="connection-button" disabled={busy} onClick={()=>void act(async()=>{const data=await fetchMcpTools(selected);setTools(data.tools);setApproved(data.tools.filter(t=>t.approved).map(t=>t.name));setModal('tools');return 'Verified tool permissions loaded.';})}>Manage agent tools</button>}{selected!=='parallel'&&configured(connection) && <button className="connection-button is-danger" disabled={busy} onClick={() => setModal('disconnect')}>Disconnect</button>}</div>}</>}
+      {modal==='marketo' && <form onSubmit={event => { event.preventDefault(); if (owner) void act(async () => { await configureMarketo(marketoForm); return 'Marketo credentials saved. Run a sync to verify access and review program mappings.'; },true); }}><p>Enter your Marketo API credentials. Saved secrets are encrypted on the backend and are never returned in API responses.</p><label>REST URL<input type="url" required value={marketoForm.rest_url} placeholder="https://123-ABC-456.mktorest.com/rest" onChange={e => setMarketoForm({ ...marketoForm,rest_url:e.target.value })}/></label><label>Identity URL<input type="url" required value={marketoForm.identity_url} placeholder="https://123-ABC-456.mktorest.com/identity" onChange={e => setMarketoForm({ ...marketoForm,identity_url:e.target.value })}/></label><label>Client ID<input required autoComplete="off" value={marketoForm.client_id} onChange={e => setMarketoForm({ ...marketoForm,client_id:e.target.value })}/></label><label>Client secret<input type="password" required autoComplete="new-password" value={marketoForm.client_secret} onChange={e => setMarketoForm({ ...marketoForm,client_secret:e.target.value })}/></label><div className="connections-dialog-actions"><button type="submit" className="connection-button is-primary" disabled={busy}>{busy ? 'Saving…' : 'Save credentials'}</button><button type="button" className="connection-button" onClick={close} disabled={busy}>Cancel</button></div></form>}
+      {modal==='endpoint' && <form onSubmit={event => { event.preventDefault(); if (owner) void act(async () => { const saved=entryMode==='json'?await saveMcpJson(selected,jsonConfig,selected==='custom'?customName:undefined):await saveMcpServer(selected,endpointForm.server_url,headers,selected==='custom'?customName:undefined);if(saved.connector_id)setSelected(saved.connector_id);setHeaders([{name:'Authorization',value:''}]);setJsonConfig('');setJsonValidated('');setJsonResult(null);return 'Remote endpoint saved. Test its connection before using its tools. Saving does not start native data sync.'; },true); }}><p>Use a provider-approved MCP endpoint. Saving it does not activate campaign delivery or native data ingestion.</p>{selected==='custom' && <label>Connector name<input required={entryMode==='fields'} maxLength={80} value={customName} placeholder="Your MCP server" onChange={e=>setCustomName(e.target.value)}/></label>}<div className="connections-entry-tabs" role="tablist" aria-label="MCP configuration format"><button type="button" role="tab" aria-selected={entryMode==='fields'} onClick={()=>setEntryMode('fields')}>Connection fields</button><button type="button" role="tab" aria-selected={entryMode==='json'} onClick={()=>setEntryMode('json')}>Paste JSON</button></div>{entryMode==='json'?<div className="connections-json-entry"><label>MCP configuration JSON<textarea required rows={10} autoComplete="off" spellCheck={false} value={jsonConfig} placeholder={'{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://provider.example/mcp",\n      "headers": {"Authorization": "Bearer YOUR_TOKEN"}\n    }\n  }\n}'} onChange={e=>{setJsonConfig(e.target.value);setJsonValidated('');setJsonResult(null);}}/></label><p className="connections-help">Add one HTTPS MCP server. A direct URL-and-headers object also works. Local command and stdio configurations are not supported.</p><button type="button" className="connection-button" disabled={busy||!jsonConfig.trim()} onClick={()=>void act(async()=>{let parsed;try{parsed=JSON.parse(jsonConfig);}catch{throw new Error('Invalid JSON. Check quotes, commas and braces.');}if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('MCP configuration must be a JSON object.');const result=await validateMcpJson(jsonConfig);if(selected==='custom'&&!customName.trim()&&result.name)setCustomName(result.name);setJsonValidated(jsonConfig);setJsonResult(result);return `Configuration validated: ${result.tool_count} tools found. Nothing saved. No model calls.`;})}>{busy?'Validating…':'Validate'}</button>{jsonResult&&jsonValidated===jsonConfig&&<p className="connections-json-valid" role="status"><CheckCircle2 size={15}/>Valid MCP connection · {jsonResult.tool_count} tools<br/>{jsonResult.server_url}<br/>Headers: {jsonResult.header_names.join(', ')}</p>}</div>:<><label>Server URL<input type="url" required placeholder="https://provider.example/mcp" value={endpointForm.server_url} onChange={e => setEndpointForm({ ...endpointForm,server_url:e.target.value })}/></label><div className="connections-auth-headers">{headers.map((header,index)=><div key={index}><label>Header name {index+1}<input required maxLength={80} value={header.name} onChange={e=>setHeaders(headers.map((h,i)=>i===index?{...h,name:e.target.value}:h))}/></label><label>Header value {index+1}<input required type="password" autoComplete="new-password" value={header.value} onChange={e=>setHeaders(headers.map((h,i)=>i===index?{...h,value:e.target.value}:h))}/></label>{headers.length>1 && <button type="button" className="connection-icon-button" aria-label={`Remove header ${index+1}`} onClick={()=>setHeaders(headers.filter((_,i)=>i!==index))}><X size={15}/></button>}</div>)}<button type="button" className="connection-button" disabled={headers.length>=4} onClick={()=>setHeaders([...headers,{name:'',value:''}])}><Plus size={14}/>Add header</button></div></>}<label>Provider documentation URL<input type="url" value={endpointForm.documentation_url} onChange={e => setEndpointForm({ ...endpointForm,documentation_url:e.target.value })}/></label><p className="connections-help">Test uses the saved endpoint and saved credentials. Save changed values before testing.</p><div className="connections-dialog-actions"><button type="submit" className="connection-button is-primary" disabled={busy||(entryMode==='json'&&(!jsonValidated||jsonValidated!==jsonConfig))}>{busy ? 'Working…' : 'Save endpoint'}</button><button type="button" className="connection-button" disabled={busy || !connection?.mcpConfigured} onClick={() => void act(async () => { const result=await connectMcpConnector(selected,endpointForm.documentation_url); return `Endpoint verified: ${result.probe?.tool_count ?? 0} tools discovered. No records were imported.`; })}>Test saved connection</button><button type="button" className="connection-button" onClick={close} disabled={busy}>Cancel</button></div></form>}
+      {modal==='tools' && <><p>Allow the operations agent to use verified read tools. Review their descriptions before granting access. Provider writes continue through governed product actions.</p><div className="connections-tool-list">{tools.map(tool=><label key={tool.name}><input type="checkbox" disabled={!tool.read_candidate||busy} checked={approved.includes(tool.name)} onChange={e=>setApproved(e.target.checked?[...approved,tool.name]:approved.filter(name=>name!==tool.name))}/><span><strong>{tool.name}</strong><small>{tool.read_candidate?tool.description||'Read tool': 'Not available for direct agent use'}</small></span></label>)}</div><div className="connections-dialog-actions"><button className="connection-button is-primary" disabled={busy} onClick={()=>void act(async()=>{await approveMcpReadTools(selected,approved);return 'Agent read permissions saved.';},true)}>Save permissions</button><a className="connection-button" href="#automation">Review with operations agent<ArrowUpRight size={14}/></a></div></>}
+      {modal==='disconnect' && <><p>Remove the saved MCP endpoint and credentials. Imported records and optional API adapter settings remain available.</p><div className="connections-dialog-actions"><button className="connection-button is-danger" disabled={busy} onClick={() => void act(async () => { await disconnectMcpConnector(selected); return `${provider.name} disconnected.`; },true)}>{busy ? 'Disconnecting…' : 'Disconnect'}</button><button className="connection-button" disabled={busy} onClick={close}>Keep connection</button></div></>}
+    </div></div></div>}
+  </div>;
 };

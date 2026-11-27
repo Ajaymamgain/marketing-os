@@ -46,6 +46,10 @@ export interface PersonaMember {
   sentiment: 'positive' | 'neutral' | 'skeptical' | 'unknown' | 'CHAMPION' | 'SUPPORTIVE';
   influenceLevel: 'high' | 'medium' | 'low' | 'HIGH' | 'MEDIUM' | 'LOW';
   keyNotes: string;
+  roleSource?: string;
+  roleConfidence?: number;
+  roleInference?: { status?: string; suggested_role?: string; evidence?: string; reason?: string; evaluated_at?: string; model?: string };
+  coverageReason?: string;
 }
 
 export type CommitteeMember = PersonaMember;
@@ -86,6 +90,7 @@ export interface AccountDemandUnit {
   scoreDelta7d: number; // e.g. +14
   confidenceLevel: number; // 0-100 %
   estDealValue: number; // USD
+  dataAvailability?: { revenue: boolean; telemetry: boolean; scoreTrend: boolean; confidence: boolean };
   scores: ScoreComponents;
   committee: BuyingCommittee;
   telemetry: TelemetryMetrics;
@@ -99,6 +104,21 @@ export interface AccountDemandUnit {
   assignedSdr: string;
   assignedAe: string;
   lastTelemetryPing: string;
+  scoreAudit?: {
+    composite: number;
+    fit: number;
+    intent: number;
+    coverage: number;
+    grade: string;
+    priorityBand: string;
+    routingState: string;
+    recommendedPlay: string;
+    lastScoredAt: string | null;
+    positiveSignals: string[];
+    negativeSignals: string[];
+    signalsCount: number;
+  };
+  jevDecision?: JevDecision;
 }
 
 export interface TelemetrySignal {
@@ -162,6 +182,16 @@ export interface DataConnector {
   lastSync: string;
   schemaValid?: boolean;
   version?: string;
+  role?: string;
+  restUrl?: string;
+  lastSyncRecords?: number;
+  lastSyncStatus?: string;
+  mcpProbe?: { ok: boolean; tool_count?: number; checked_at?: string; skills?: Array<{name:string; description:string; uri:string}> };
+  mcpServerUrl?: string;
+  mcpConfigured?: boolean;
+  mcpHeaderNames?: string[];
+  mcpPublished?: boolean;
+  mcpDocumentation?: string;
 }
 
 export interface OperationalTask {
@@ -174,6 +204,15 @@ export interface OperationalTask {
   assignedTo: string;
   dueDate: string;
   completed: boolean;
+  archived?: boolean;
+  recordStatus?: string;
+  audit?: {
+    source?: string; decision_kind?: string; play?: string; stage?: string; routing_state?: string;
+    fit?: number; intent?: number; coverage?: number; composite?: number;
+    marketo_action?: string; marketo_destination?: string; recorded_at?: string; scored_at?: string;
+    decision_applied?: boolean; applied_count?: number; requested_count?: number; run_id?: string;
+    operational_next_action?: { title?: string; code?: string; detail?: string };
+  };
   impactScore?: number;
   sourceSignal?: string;
   createdAt?: string;
@@ -188,39 +227,93 @@ export type ActiveNavTab =
   | 'ACCOUNTS'
   | 'COMMITTEES'
   | 'COVERAGE'
-  | 'PI_OPS'
+  | 'DECISION_OPS'
   | 'SIGNALS'
+  | 'SIMULATOR'
+  | 'CONVERSIONS'
   | 'RULES'
+  | 'INTELLIGENCE'
+  | 'SEGMENTS'
   | 'CONNECTORS'
   | 'TASKS'
   | 'TERMINAL'
-  | 'CHATBOT';
+  | 'AUTOMATION';
 
-export type GeminiModelTier =
-  | 'gemini-3.5-flash'
-  | 'gemini-3.1-flash-lite'
-  | 'gemini-3.1-pro-preview';
-
-export type ChatbotRole =
-  | 'default'
-  | 'telemetry_analyst'
-  | 'committee_strategist'
-  | 'pipeline_commander';
-
-export interface ChatFunctionExecution {
-  id?: string;
-  name: string;
-  args: Record<string, any>;
-  result: Record<string, any>;
+export interface JevChoiceOption {
+  selected: string;
+  confidence: number;
+  probabilities?: Record<string, number>;
 }
 
-export interface ChatMessage {
+export interface JevChoiceDecision {
+  stage?: JevChoiceOption;
+  priority?: JevChoiceOption;
+  routing?: JevChoiceOption;
+  play?: JevChoiceOption;
+  audience_segment?: JevChoiceOption;
+  channel?: JevChoiceOption;
+  next_action?: JevChoiceOption;
+}
+
+export interface JevScoreDecision {
+  name: string;
+  score: number;
+  levels: string[];
+  probabilities: number[];
+  confidence: number;
+  legend: string[];
+}
+
+export interface JevNoulDecision {
+  name: string;
+  probability: number;
+  threshold: number;
+  is_approved: boolean;
+  interpretation: string;
+}
+
+export interface JevDecision {
+  provider: string;
+  model?: string;
+  applied: boolean;
+  choice?: JevChoiceDecision;
+  score?: JevScoreDecision;
+  noul?: JevNoulDecision;
+  stage_confidence?: number;
+  play_confidence?: number;
+  segment_confidence?: number;
+  channel_confidence?: number;
+  progress_probability?: number;
+  readiness?: { score: number };
+  next_action_confidence?: number;
+}
+
+export interface CustomPlaybook {
   id: string;
-  role: 'user' | 'model' | 'system';
-  text: string;
-  timestamp: string;
-  modelUsed?: string;
-  isSimulated?: boolean;
-  functionCalls?: ChatFunctionExecution[];
+  name: string;
+  description: string;
+  action: string;
+  lane: string;
+  sla_hours: number;
+  noul_question: string;
+  noul_threshold: number;
+  noul_operator: string;
+  min_fit: number;
+  min_intent: number;
+  is_active: boolean;
+  matched_units_count?: number;
+  matched_units?: Array<{
+    demand_unit_key: string;
+    account_domain: string;
+    need_key: string;
+    stage: string;
+    composite_score: number;
+    noul_score: number;
+    choice_stage: string;
+    score_readiness: number;
+    reason: string;
+  }>;
+  created_at?: string;
+  updated_at?: string;
 }
 

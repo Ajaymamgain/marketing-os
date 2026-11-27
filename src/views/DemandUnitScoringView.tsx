@@ -1,821 +1,198 @@
-import React, { useState } from 'react';
-import {
-  Sliders,
-  Filter,
-  Search,
-  CheckCircle2,
-  AlertCircle,
-  Activity,
-  ChevronRight,
-  RotateCcw,
-  Sparkles,
-  Bot,
-  Layers,
-  Zap,
-} from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, Clock3, Search, Settings2, SlidersHorizontal } from 'lucide-react';
 import { AccountDemandUnit } from '../types';
-import { playCadClick, playCadConfirm } from '../utils/audio';
+import { fetchScoreHistory, fetchScoringPolicy, ScoreSnapshot, ScoringPolicy } from '../services/api';
+import { JevDecisionCard } from '../components/JevDecisionCard';
 
 interface DemandUnitScoringViewProps {
   accounts: AccountDemandUnit[];
   theme?: 'dark' | 'light';
   onSelectAccount: (account: AccountDemandUnit) => void;
-  onNavigateTab?: (tab: any) => void;
-  onTriggerAiPrompt?: (prompt: string) => void;
+  onApplied?: () => void;
 }
 
-export const DemandUnitScoringView: React.FC<DemandUnitScoringViewProps> = ({
-  accounts,
-  theme = 'dark',
-  onSelectAccount,
-  onNavigateTab,
-  onTriggerAiPrompt,
-}) => {
-  const [selectedMotion, setSelectedMotion] = useState<string>('ALL');
-  const [sortBy, setSortBy] = useState<'score' | 'deal' | 'coverage'>('score');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [searchQuery, setSearchQuery] = useState('');
+type PortfolioFilter = 'all' | 'sales' | 'marketing' | 'hold' | 'coverage';
+type PortfolioSort = 'highest' | 'lowest' | 'recent';
 
-  // Clean, focused Simulator State
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
-  const [simTelemetry, setSimTelemetry] = useState(85);
-  const [simCommittee, setSimCommittee] = useState(80);
-  const [simBehavioral, setSimBehavioral] = useState(75);
-  const [simIntent, setSimIntent] = useState(70);
-  const [simFit, setSimFit] = useState(90);
+const defaultWeights = { fit: 0, intent: 0, coverage: 0 };
+const priorityLabels: Record<string, string> = {
+  P1_IMMEDIATE_SALES: 'Immediate sales',
+  P2_SALES_READY: 'Sales ready',
+  P3_MARKETING_PLAY: 'Marketing play',
+  MONITOR: 'Monitor',
+};
+const stageLabels: Record<string, string> = {
+  target: 'Target', engaged: 'Engaged', prioritized_du: 'Prioritized',
+  qualified_du: 'Qualified', pipeline_deal: 'Pipeline', closed_won: 'Closed won', expansion: 'Expansion',
+};
 
-  // Compute composite score dynamically
-  const simComposite = Math.round(
-    simTelemetry * 0.3 +
-    simCommittee * 0.25 +
-    simBehavioral * 0.25 +
-    simIntent * 0.1 +
-    simFit * 0.1
-  );
+const humanize = (value: string) => value.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const number = (value: number) => Number.isFinite(value) ? value.toFixed(1) : '0.0';
+const clamp = (value: number) => Math.max(0, Math.min(100, value));
+const scoreFor = (account: AccountDemandUnit) => account.scoreAudit?.composite ?? account.compositeScore;
+const coverageFor = (account: AccountDemandUnit) => account.scoreAudit?.coverage ?? account.committee.coverageScore;
+const routeFor = (account: AccountDemandUnit) => account.scoreAudit?.routingState || 'HOLD';
 
-  const handleLoadAccount = (accId: string) => {
-    playCadClick();
-    setSelectedAccountId(accId);
-    const target = accounts.find((a) => a.id === accId);
-    if (target) {
-      setSimTelemetry(target.scores.productTelemetry);
-      setSimCommittee(target.scores.committeeMaturity);
-      setSimBehavioral(target.scores.behavioralEngagement);
-      setSimIntent(target.scores.intentSurge);
-      setSimFit(target.scores.firmographicFit);
-    }
-  };
+function scoredAt(value: string | null | undefined) {
+  if (!value) return 'No score timestamp';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No score timestamp';
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
 
-  const handleResetSimulator = () => {
-    playCadClick();
-    setSelectedAccountId('');
-    setSimTelemetry(85);
-    setSimCommittee(80);
-    setSimBehavioral(75);
-    setSimIntent(70);
-    setSimFit(90);
-  };
+export const DemandUnitScoringView: React.FC<DemandUnitScoringViewProps> = ({ accounts, onSelectAccount }) => {
+  const topRef = useRef<HTMLDivElement>(null);
+  const [selectedId, setSelectedId] = useState('');
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<PortfolioFilter>('all');
+  const [sort, setSort] = useState<PortfolioSort>('highest');
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [policyError,setPolicyError]=useState('');
+  const [policy, setPolicy] = useState<ScoringPolicy | null>(null);
+  const [history, setHistory] = useState<ScoreSnapshot[]>([]);
+  const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
 
-  const filteredAccounts = accounts
-    .filter((acc) => {
-      if (selectedMotion !== 'ALL' && acc.primaryMotion !== selectedMotion) return false;
-      if (
-        searchQuery &&
-        !acc.accountName.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        !acc.solutionTarget.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-        return false;
-      return true;
-    })
-    .sort((a, b) => {
-      let valA = a.compositeScore;
-      let valB = b.compositeScore;
-      if (sortBy === 'deal') {
-        valA = a.estDealValue;
-        valB = b.estDealValue;
-      } else if (sortBy === 'coverage') {
-        valA = a.committee.coverageScore;
-        valB = b.committee.coverageScore;
-      }
-      return sortOrder === 'desc' ? valB - valA : valA - valB;
+  useEffect(() => {
+    let active = true;
+    fetchScoringPolicy().then((value) => { if (active) setPolicy(value); }).catch((error) => { if(active)setPolicyError(error instanceof Error?error.message:'Saved scoring policy unavailable.'); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    if (!accounts.some((item) => item.id === selectedId)) setSelectedId(accounts[0]?.id || '');
+  }, [accounts, selectedId]);
+  useEffect(() => { setVisibleCount(20); }, [query, filter, sort]);
+
+  const weights = policy
+    ? { fit: policy.fit_percent, intent: policy.intent_percent, coverage: policy.coverage_percent }
+    : defaultWeights;
+  const selected = accounts.find((item) => item.id === selectedId) || accounts[0];
+  useEffect(() => {
+    if (!selected?.id) { setHistory([]); setHistoryState('ready'); return; }
+    let active = true;
+    setHistoryState('loading');
+    fetchScoreHistory(selected.id).then((rows) => {
+      if (active) { setHistory(rows); setHistoryState('ready'); }
+    }).catch(() => {
+      if (active) { setHistory([]); setHistoryState('unavailable'); }
     });
+    return () => { active = false; };
+  }, [selected?.id, selected?.scoreAudit?.lastScoredAt]);
+  const audit = selected?.scoreAudit;
+  const fit = audit?.fit ?? selected?.scores.firmographicFit ?? 0;
+  const intent = audit?.intent ?? selected?.scores.behavioralEngagement ?? 0;
+  const coverage = audit?.coverage ?? selected?.committee.coverageScore ?? 0;
+  const composite = selected ? scoreFor(selected) : 0;
+  const contributions = [
+    { label: 'Account fit', score: fit, weight: weights.fit, className: 'fit', detail: 'Industry, size, revenue, and technology' },
+    { label: 'Buying intent', score: intent, weight: weights.intent, className: 'intent', detail: 'Identified activity with decay and repeat limits' },
+    { label: 'Group coverage', score: coverage, weight: weights.coverage, className: 'coverage', detail: 'Verified people in the buying group' },
+  ];
+  const calculated = contributions.reduce((sum, item) => sum + item.score * item.weight / 100, 0);
+  const salesCount = accounts.filter((item) => routeFor(item) === 'SALES_LANE').length;
+  const coverageGaps = accounts.filter((item) => coverageFor(item) <= 0).length;
+  const average = accounts.length ? accounts.reduce((sum, item) => sum + scoreFor(item), 0) / accounts.length : 0;
 
-  const pqlCount = accounts.filter((a) => a.compositeScore >= 80).length;
+  const filtered = useMemo(() => accounts.filter((item) => {
+    const term = query.trim().toLowerCase();
+    if (term && ![item.accountName, item.domain, item.solutionTarget].some((value) => value.toLowerCase().includes(term))) return false;
+    if (filter === 'sales') return routeFor(item) === 'SALES_LANE';
+    if (filter === 'marketing') return routeFor(item) === 'MARKETING_LANE';
+    if (filter === 'hold') return routeFor(item) === 'HOLD';
+    if (filter === 'coverage') return coverageFor(item) <= 0;
+    return true;
+  }).sort((left, right) => {
+    if (sort === 'recent') return (Date.parse(right.scoreAudit?.lastScoredAt || '') || 0) - (Date.parse(left.scoreAudit?.lastScoredAt || '') || 0) || scoreFor(right) - scoreFor(left);
+    return sort === 'lowest' ? scoreFor(left) - scoreFor(right) : scoreFor(right) - scoreFor(left);
+  }), [accounts, query, filter, sort]);
 
-  return (
-    <div className="space-y-5 animate-fadeIn font-sans">
-      {/* Station Header */}
-      <div
-        className={`p-4 rounded-xl border transition-all ${
-          theme === 'light'
-            ? 'bg-white border-slate-200 shadow-xs'
-            : 'bg-[#081322] border-cyan-500/30'
-        }`}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold border ${
-                  theme === 'light'
-                    ? 'bg-sky-50 border-sky-300 text-sky-800'
-                    : 'bg-cyan-950 border-cyan-400/40 text-cyan-300'
-                }`}
-              >
-                ST.02 // DEMAND UNITS
-              </span>
-              <span className={`text-xs font-mono ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                SCORING &amp; CALIBRATION BENCH
-              </span>
-            </div>
-            <h2
-              className={`text-lg font-bold tracking-tight ${
-                theme === 'light' ? 'text-slate-900' : 'text-white'
-              }`}
-            >
-              Demand Unit Scoring &amp; Calibration
-            </h2>
-            <p className={`text-xs font-mono ${theme === 'light' ? 'text-slate-600' : 'text-slate-400'}`}>
-              Evaluates target accounts using dual-motion vectors (PLG product velocity + SLG committee buy-in).
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <span
-              className={`px-2.5 py-1 rounded border font-semibold ${
-                theme === 'light'
-                  ? 'bg-slate-50 border-slate-300 text-slate-700'
-                  : 'bg-[#091526] border-cyan-500/30 text-cyan-300'
-              }`}
-            >
-              TOTAL UNITS: {accounts.length}
-            </span>
-            <span
-              className={`px-2.5 py-1 rounded border font-semibold ${
-                theme === 'light'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                  : 'bg-[#091526] border-emerald-500/30 text-emerald-300'
-              }`}
-            >
-              PQL READY: {pqlCount}
-            </span>
-          </div>
-        </div>
+  return <div className="score-studio" ref={topRef}>
+    <header className="score-studio-head">
+      <div>
+        <p className="score-studio-kicker">DEMAND INTELLIGENCE / SCORING</p>
+        <h1>Understand every score.</h1>
+        <p>Trace the evidence behind a demand unit, review its operating lane, and see how fit, intent, and coverage contribute.</p>
       </div>
+      <a className="score-studio-config" href="#rules"><Settings2 size={17} aria-hidden="true" /> Configure scoring <ArrowRight size={16} aria-hidden="true" /></a>
+    </header>
 
-      {/* Simplified, Clean Live Simulator Card */}
-      <div
-        className={`p-4 rounded-xl border transition-all ${
-          theme === 'light'
-            ? 'bg-white border-slate-200 shadow-xs'
-            : 'bg-[#081322] border-cyan-500/30'
-        }`}
-      >
-        {/* Simulator Subheader */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 mb-4 border-slate-200 dark:border-cyan-900/40">
-          <div className="flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-cyan-400" />
-            <h3
-              className={`text-xs font-mono font-bold uppercase tracking-wider ${
-                theme === 'light' ? 'text-slate-900' : 'text-white'
-              }`}
-            >
-              Live Scoring Simulator
-            </h3>
-            <span
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border hidden sm:inline-block ${
-                theme === 'light'
-                  ? 'bg-slate-100 border-slate-200 text-slate-600'
-                  : 'bg-[#060c18] border-cyan-500/30 text-cyan-300'
-              }`}
-            >
-              (PT×0.3) + (CM×0.25) + (BE×0.25) + (IS×0.1) + (FF×0.1)
-            </span>
-          </div>
+    <section className="score-studio-metrics" aria-label="Scoring portfolio summary">
+      <div><span>Demand units</span><strong>{accounts.length}</strong><small>In this workspace</small></div>
+      <div><span>Average score</span><strong>{number(average)}</strong><small>Across scored demand units</small></div>
+      <div><span>Sales lane</span><strong>{salesCount}</strong><small>Current routing decisions</small></div>
+      <div><span>Coverage gaps</span><strong>{coverageGaps}</strong><small>Verified coverage is zero</small></div>
+    </section>
 
-          {/* Quick Account Preset Loaders */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-[11px] font-mono mr-1 ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-              Load Preset:
-            </span>
-            {accounts.slice(0, 4).map((acc) => (
-              <button
-                key={acc.id}
-                type="button"
-                onClick={() => handleLoadAccount(acc.id)}
-                className={`px-2 py-1 rounded text-[11px] font-mono font-semibold transition-all cursor-pointer border ${
-                  selectedAccountId === acc.id
-                    ? theme === 'light'
-                      ? 'bg-sky-100 border-sky-400 text-sky-900 font-bold'
-                      : 'bg-cyan-500/20 border-cyan-400/60 text-cyan-300 font-bold'
-                    : theme === 'light'
-                    ? 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
-                    : 'bg-[#060c18] hover:bg-[#0b1b30] border-slate-800 text-slate-300'
-                }`}
-              >
-                {acc.accountName}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={handleResetSimulator}
-              title="Reset values"
-              className={`p-1 rounded text-xs transition-colors cursor-pointer border ${
-                theme === 'light'
-                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-600'
-                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
-              }`}
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-          </div>
+    {selected?.domain.endsWith('.example') && <div className="dm-notice mb-4"><CircleAlert size={18}/><p>This is a synthetic account from the source-shaped sample dataset. The scoring and decision services run on its imported events; the scores are not conversion-trained predictions.</p></div>}
+    {selected ? <div className="score-studio-focus">
+      <section className="score-studio-primary" aria-label="Selected demand unit score">
+        <div className="score-studio-primary-top">
+          <span className="score-studio-overline">SELECTED DEMAND UNIT</span>
+          <span className="score-studio-grade">{audit?.grade || 'Scored'}</span>
         </div>
-
-        {/* Sliders and Score Gauge in Clean 2-Column Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
-          {/* Sliders Column (2 cols) */}
-          <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-            {/* 1. Product Telemetry */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className={theme === 'light' ? 'text-slate-800 font-semibold' : 'text-cyan-300 font-semibold'}>
-                  Product Telemetry (30%)
-                </span>
-                <span className={`font-bold ${theme === 'light' ? 'text-sky-800' : 'text-cyan-300'}`}>
-                  {simTelemetry} pts
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={simTelemetry}
-                onChange={(e) => {
-                  setSimTelemetry(Number(e.target.value));
-                  playCadClick();
-                }}
-                className="w-full accent-cyan-400 h-1.5 rounded cursor-pointer bg-slate-200 dark:bg-slate-800"
-              />
-              <span className={`text-[10px] block ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                Seat cap breach, weekly active devs, API volume
-              </span>
-            </div>
-
-            {/* 2. Committee Maturity */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className={theme === 'light' ? 'text-slate-800 font-semibold' : 'text-indigo-300 font-semibold'}>
-                  Committee Maturity (25%)
-                </span>
-                <span className={`font-bold ${theme === 'light' ? 'text-indigo-800' : 'text-indigo-300'}`}>
-                  {simCommittee} pts
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={simCommittee}
-                onChange={(e) => {
-                  setSimCommittee(Number(e.target.value));
-                  playCadClick();
-                }}
-                className="w-full accent-indigo-400 h-1.5 rounded cursor-pointer bg-slate-200 dark:bg-slate-800"
-              />
-              <span className={`text-[10px] block ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                Champion engagement, Economic Buyer, Infosec signoff
-              </span>
-            </div>
-
-            {/* 3. Behavioral Engagement */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className={theme === 'light' ? 'text-slate-800 font-semibold' : 'text-emerald-300 font-semibold'}>
-                  Behavioral Engagement (25%)
-                </span>
-                <span className={`font-bold ${theme === 'light' ? 'text-emerald-800' : 'text-emerald-300'}`}>
-                  {simBehavioral} pts
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={simBehavioral}
-                onChange={(e) => {
-                  setSimBehavioral(Number(e.target.value));
-                  playCadClick();
-                }}
-                className="w-full accent-emerald-400 h-1.5 rounded cursor-pointer bg-slate-200 dark:bg-slate-800"
-              />
-              <span className={`text-[10px] block ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                Technical docs, webinar attendance, git repo events
-              </span>
-            </div>
-
-            {/* 4. Intent Surge */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className={theme === 'light' ? 'text-slate-800 font-semibold' : 'text-amber-300 font-semibold'}>
-                  3P Intent Surge (10%)
-                </span>
-                <span className={`font-bold ${theme === 'light' ? 'text-amber-800' : 'text-amber-300'}`}>
-                  {simIntent} pts
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={simIntent}
-                onChange={(e) => {
-                  setSimIntent(Number(e.target.value));
-                  playCadClick();
-                }}
-                className="w-full accent-amber-400 h-1.5 rounded cursor-pointer bg-slate-200 dark:bg-slate-800"
-              />
-              <span className={`text-[10px] block ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                G2 comparisons, Bombora surge alerts, 6sense spikes
-              </span>
-            </div>
-
-            {/* 5. Firmographic Fit */}
-            <div className="sm:col-span-2 space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className={theme === 'light' ? 'text-slate-800 font-semibold' : 'text-purple-300 font-semibold'}>
-                  Firmographic Fit / ICP Alignment (10%)
-                </span>
-                <span className={`font-bold ${theme === 'light' ? 'text-purple-800' : 'text-purple-300'}`}>
-                  {simFit} pts
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={simFit}
-                onChange={(e) => {
-                  setSimFit(Number(e.target.value));
-                  playCadClick();
-                }}
-                className="w-full accent-purple-400 h-1.5 rounded cursor-pointer bg-slate-200 dark:bg-slate-800"
-              />
-              <span className={`text-[10px] block ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                Employee count, cloud tech stack, revenue tier
-              </span>
-            </div>
-          </div>
-
-          {/* Results Column (1 col) */}
-          <div
-            className={`p-4 rounded-xl border flex flex-col justify-between h-full ${
-              theme === 'light'
-                ? 'bg-slate-50 border-slate-200'
-                : 'bg-[#060b13] border-cyan-500/30'
-            }`}
-          >
-            <div>
-              <span
-                className={`text-[10px] font-mono uppercase tracking-wider block ${
-                  theme === 'light' ? 'text-slate-500' : 'text-slate-400'
-                }`}
-              >
-                Calculated Composite Score
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span
-                  className={`text-4xl font-bold font-mono ${
-                    simComposite >= 80
-                      ? 'text-emerald-500'
-                      : simComposite >= 65
-                      ? theme === 'light'
-                        ? 'text-sky-700'
-                        : 'text-cyan-300'
-                      : 'text-amber-500'
-                  }`}
-                >
-                  {simComposite}
-                </span>
-                <span className={`text-xs font-mono ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-                  / 100
-                </span>
-              </div>
-
-              <div className="mt-3">
-                {simComposite >= 80 ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-400/50 text-emerald-800 dark:text-emerald-300 text-xs font-mono font-bold">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    PQL READY // EXPANSION
-                  </span>
-                ) : simComposite >= 65 ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-sky-50 dark:bg-cyan-950/70 border border-sky-300 dark:border-cyan-400/50 text-sky-800 dark:text-cyan-300 text-xs font-mono font-bold">
-                    <Activity className="w-3.5 h-3.5 text-sky-500 dark:text-cyan-400" />
-                    QUALIFIED DEMAND UNIT (SQL)
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-400/50 text-amber-800 dark:text-amber-300 text-xs font-mono font-bold">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                    NURTURE / EVALUATING
-                  </span>
-                )}
-              </div>
-
-              <p
-                className={`text-[11px] font-mono mt-3 leading-relaxed border-t pt-2.5 ${
-                  theme === 'light'
-                    ? 'border-slate-200 text-slate-600'
-                    : 'border-slate-800 text-slate-400'
-                }`}
-              >
-                {simComposite >= 80
-                  ? 'Recommendation: Product-Led Seat Velocity Escalation. Dispatch AE immediately with MSA enterprise addendum.'
-                  : simComposite >= 65
-                  ? 'Recommendation: Committee discovery call. Identify economic buyer and confirm infosec baseline.'
-                  : 'Recommendation: Continue self-serve developer telemetry nurture drip.'}
-              </p>
-            </div>
-
-            {onTriggerAiPrompt && (
-              <button
-                type="button"
-                onClick={() => {
-                  playCadConfirm();
-                  onTriggerAiPrompt(
-                    `Analyze demand unit score: Telemetry=${simTelemetry}, Committee=${simCommittee}, Behavioral=${simBehavioral}, Intent=${simIntent}, Fit=${simFit}. Composite=${simComposite}/100. Recommend immediate marketing operations actions.`
-                  );
-                }}
-                className={`mt-4 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-mono font-bold border transition-colors cursor-pointer ${
-                  theme === 'light'
-                    ? 'bg-sky-50 hover:bg-sky-100 border-sky-300 text-sky-900'
-                    : 'bg-cyan-950 hover:bg-cyan-900 border-cyan-500/40 text-cyan-200'
-                }`}
-              >
-                <Bot className="w-3.5 h-3.5 text-cyan-400" />
-                <span>AI DIAGNOSE SCORES</span>
-              </button>
-            )}
-          </div>
+        <div className="score-studio-identity"><div><h2>{selected.accountName}</h2><p>{selected.solutionTarget} <span aria-hidden="true">·</span> {selected.domain}</p></div><span className="score-studio-stage">{stageLabels[selected.stage] || humanize(selected.stage)}</span></div>
+        <div className="score-studio-score-line">
+          <div className="score-studio-big-score"><strong>{number(composite)}</strong><span>/ 100</span></div>
+          <div className="score-studio-score-context"><span>Composite score</span><p>Calculated from three explainable inputs and used to evaluate the next action.</p></div>
         </div>
+        <div className="score-studio-gauge" role="meter" aria-label="Composite score" aria-valuemin={0} aria-valuemax={100} aria-valuenow={clamp(composite)}><span style={{ width: clamp(composite) + '%' }} /></div>
+        <div className="score-studio-primary-footer"><span><Clock3 size={15} aria-hidden="true" /> Scored {scoredAt(audit?.lastScoredAt)}</span><button type="button" onClick={() => onSelectAccount(selected)}>Open account <ArrowRight size={16} aria-hidden="true" /></button></div>
+      </section>
+
+      <section className="score-studio-breakdown" aria-label="Score calculation">
+        <div className="score-studio-section-head"><div><p className="score-studio-overline">THE CALCULATION</p><h2>Where the score comes from</h2></div><span>Weighted / 100</span></div>
+        {!policy && <p role={policyError ? 'alert' : 'status'} className="dm-notice mt-4">{policyError || 'Loading saved policy…'}</p>}
+        {policy && <div className="score-studio-contributions">{contributions.map((item) => <div className={'score-studio-contribution ' + item.className} key={item.label}>
+          <div className="score-studio-contribution-heading"><strong>{item.label}</strong><span>{number(item.score)} × {item.weight}% <b>= {number(item.score * item.weight / 100)} pts</b></span></div>
+          <div className="score-studio-track"><span style={{ width: clamp(item.score) + '%' }} /></div><p>{item.detail}</p>
+        </div>)}</div>}
+        {policy && <div className="score-studio-formula"><span>Current policy</span><strong>{weights.fit}% fit + {weights.intent}% intent + {weights.coverage}% coverage</strong></div>}
+        {policy && Math.abs(calculated - composite) > 1 && <p className="score-studio-stale"><CircleAlert size={15} aria-hidden="true" /> Stored score differs from the current formula. Review the score timestamp or recalculate under Rules.</p>}
+      </section>
+    </div> : <section className="score-studio-empty">No demand units are available in this workspace yet. Import identified activity to start scoring.</section>}
+
+    {selected && (
+      <div style={{ margin: '16px 0' }}>
+        <JevDecisionCard jevDecision={selected.jevDecision} />
       </div>
+    )}
 
-      {/* Demand Units Directory Section */}
-      <div className="space-y-3">
-        {/* Filter and Control Bar */}
-        <div
-          className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-3 text-xs font-mono ${
-            theme === 'light'
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#081220] border-cyan-500/20'
-          }`}
-        >
-          {/* Search */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <div
-              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border w-full sm:w-64 ${
-                theme === 'light'
-                  ? 'bg-slate-50 border-slate-300 text-slate-800'
-                  : 'bg-[#060c18] border-cyan-500/30 text-cyan-200'
-              }`}
-            >
-              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                placeholder="Filter demand units..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-transparent border-none outline-none text-xs w-full font-mono placeholder:text-slate-400"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="text-slate-400 hover:text-slate-200 text-[10px]"
-                >
-                  CLEAR
-                </button>
-              )}
-            </div>
-          </div>
+    {selected && <div className="score-studio-detail">
+      <section className="score-studio-panel">
+        <div className="score-studio-section-head"><div><p className="score-studio-overline">EXPLAINABILITY</p><h2>Evidence behind this score</h2></div><span>{audit?.signalsCount ?? 0} recorded events</span></div>
+        {audit?.positiveSignals.length ? <ul className="score-studio-evidence">{audit.positiveSignals.slice(0, 5).map((signal, index) => <li key={signal + index}><CheckCircle2 size={17} aria-hidden="true" /><span>{signal}</span></li>)}</ul> : <p className="score-studio-placeholder">No positive score evidence has been recorded for this demand unit.</p>}
+        {!!audit?.negativeSignals.length && <div className="score-studio-cautions"><strong>Needs attention</strong>{audit.negativeSignals.slice(0, 3).map((signal, index) => <p key={signal + index}><CircleAlert size={15} aria-hidden="true" /> {signal}</p>)}</div>}
+      </section>
+      <section className="score-studio-panel score-studio-next">
+        <div className="score-studio-section-head"><div><p className="score-studio-overline">OPERATING DECISION</p><h2>What happens next</h2></div><span className={'score-studio-route ' + (routeFor(selected) === 'SALES_LANE' ? 'sales' : routeFor(selected) === 'MARKETING_LANE' ? 'marketing' : 'hold')}>{routeFor(selected) === 'SALES_LANE' ? 'Sales lane' : routeFor(selected) === 'MARKETING_LANE' ? 'Marketing lane' : 'Hold'}</span></div>
+        <div className="score-studio-next-play"><span>Recommended play</span><strong>{humanize(audit?.recommendedPlay || selected.recommendedPlaybookId || 'No play selected')}</strong></div>
+        <div className="score-studio-next-grid"><div><span>Priority</span><strong>{priorityLabels[audit?.priorityBand || ''] || 'Review'}</strong></div><div><span>Buying group</span><strong>{number(coverage)} / 100</strong></div></div>
+        {coverage <= 0 && <p className="score-studio-gate"><CircleAlert size={17} aria-hidden="true" /> No verified coverage. Audience activation and urgent sales routing are blocked.</p>}
+        <a href="#playbooks" onClick={() => sessionStorage.setItem('dm-playbook-demand-unit', selected.id)} className="score-studio-text-link">Review playbook and delivery state <ArrowRight size={16} aria-hidden="true" /></a>
+      </section>
+    </div>}
 
-          {/* Motion Filter Pills */}
-          <div className="flex items-center gap-2">
-            <span className={`flex items-center gap-1 ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-              <Filter className="w-3.5 h-3.5 text-cyan-400" />
-              MOTION:
-            </span>
-            {['ALL', 'DUAL', 'PLG', 'SLG'].map((motion) => (
-              <button
-                key={motion}
-                onClick={() => {
-                  playCadClick();
-                  setSelectedMotion(motion);
-                }}
-                className={`px-2.5 py-1 rounded transition-colors cursor-pointer text-xs font-mono font-semibold ${
-                  selectedMotion === motion
-                    ? theme === 'light'
-                      ? 'bg-sky-100 border border-sky-400 text-sky-900 font-bold'
-                      : 'bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-bold'
-                    : theme === 'light'
-                    ? 'bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900'
-                    : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {motion}
-              </button>
-            ))}
-          </div>
+    {selected && <section className="score-studio-history" aria-label="Stored score history">
+      <div className="score-studio-section-head"><div><p className="score-studio-overline">SCORE HISTORY</p><h2>Recorded changes</h2></div><span>{history.length ? `${history.length} recent snapshots` : 'Current score only'}</span></div>
+      {historyState === 'loading' ? <p className="score-studio-placeholder">Loading recorded scores…</p> :
+        historyState === 'unavailable' ? <p className="score-studio-placeholder">Score history is unavailable right now.</p> :
+        history.length ? <div className="score-studio-history-list">{history.slice(0, 5).map((snapshot, index) => {
+          const previous = history[index + 1];
+          const change = previous ? snapshot.composite_score - previous.composite_score : null;
+          return <article key={snapshot.id}>
+            <span>{scoredAt(snapshot.scored_at)}</span>
+            <strong>{number(snapshot.composite_score)}</strong>
+            <small>{change === null ? 'First recorded score' : `${change > 0 ? '+' : ''}${number(change)} pts since prior`}</small>
+            <em>{snapshot.decision_applied ? 'Decision applied' : 'Score recorded'}</em>
+          </article>;
+        })}</div> : <p className="score-studio-placeholder">The current score predates snapshot tracking. Changes will appear here after this unit is rescored.</p>}
+    </section>}
 
-          {/* Sorting */}
-          <div className="flex items-center gap-2">
-            <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>SORT:</span>
-            <button
-              onClick={() => {
-                playCadClick();
-                setSortBy('score');
-                setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
-              }}
-              className={`px-2.5 py-1 rounded border cursor-pointer transition-colors ${
-                sortBy === 'score'
-                  ? theme === 'light'
-                    ? 'bg-sky-100 border-sky-400 text-sky-900 font-bold'
-                    : 'bg-cyan-950 border-cyan-500/40 text-cyan-300 font-bold'
-                  : theme === 'light'
-                  ? 'bg-slate-100 border-slate-200 text-slate-600'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
-              }`}
-            >
-              SCORE {sortBy === 'score' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}
-            </button>
-
-            <button
-              onClick={() => {
-                playCadClick();
-                setSortBy('deal');
-                setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
-              }}
-              className={`px-2.5 py-1 rounded border cursor-pointer transition-colors ${
-                sortBy === 'deal'
-                  ? theme === 'light'
-                    ? 'bg-sky-100 border-sky-400 text-sky-900 font-bold'
-                    : 'bg-cyan-950 border-cyan-500/40 text-cyan-300 font-bold'
-                  : theme === 'light'
-                  ? 'bg-slate-100 border-slate-200 text-slate-600'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
-              }`}
-            >
-              DEAL {sortBy === 'deal' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}
-            </button>
-
-            <button
-              onClick={() => {
-                playCadClick();
-                setSortBy('coverage');
-                setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
-              }}
-              className={`px-2.5 py-1 rounded border cursor-pointer transition-colors ${
-                sortBy === 'coverage'
-                  ? theme === 'light'
-                    ? 'bg-sky-100 border-sky-400 text-sky-900 font-bold'
-                    : 'bg-cyan-950 border-cyan-500/40 text-cyan-300 font-bold'
-                  : theme === 'light'
-                  ? 'bg-slate-100 border-slate-200 text-slate-600'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
-              }`}
-            >
-              QUORUM % {sortBy === 'coverage' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}
-            </button>
-          </div>
-        </div>
-
-        {/* Demand Units Table */}
-        <div
-          className={`rounded-xl border overflow-hidden transition-all ${
-            theme === 'light'
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#081220] border-cyan-500/25'
-          }`}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left font-mono text-xs">
-              <thead
-                className={`border-b uppercase text-[10px] tracking-wider ${
-                  theme === 'light'
-                    ? 'bg-slate-50 border-slate-200 text-slate-600'
-                    : 'bg-[#050a12] border-cyan-500/20 text-slate-400'
-                }`}
-              >
-                <tr>
-                  <th className="p-3">Demand Unit / Target</th>
-                  <th className="p-3">Motion</th>
-                  <th className="p-3">Stage</th>
-                  <th className="p-3">Composite Score</th>
-                  <th className="p-3">Vector Breakdown</th>
-                  <th className="p-3">Committee Quorum</th>
-                  <th className="p-3">Est. Pipeline</th>
-                  <th className="p-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody
-                className={`divide-y ${
-                  theme === 'light' ? 'divide-slate-200' : 'divide-cyan-950/60'
-                }`}
-              >
-                {filteredAccounts.map((acc) => (
-                  <tr
-                    key={acc.id}
-                    onClick={() => {
-                      playCadClick();
-                      onSelectAccount(acc);
-                    }}
-                    className={`transition-colors cursor-pointer group ${
-                      theme === 'light'
-                        ? 'hover:bg-slate-50/80 text-slate-800'
-                        : 'hover:bg-[#0a172a] text-white'
-                    }`}
-                  >
-                    <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`font-bold transition-colors ${
-                            theme === 'light'
-                              ? 'text-slate-900 group-hover:text-sky-700'
-                              : 'text-white group-hover:text-cyan-300'
-                          }`}
-                        >
-                          {acc.accountName}
-                        </span>
-                        <span
-                          className={`text-[10px] ${
-                            theme === 'light' ? 'text-slate-400' : 'text-slate-500'
-                          }`}
-                        >
-                          [{acc.cadCoordinates.grid}]
-                        </span>
-                      </div>
-                      <div
-                        className={`text-[11px] flex items-center gap-1.5 mt-0.5 ${
-                          theme === 'light' ? 'text-slate-500' : 'text-slate-400'
-                        }`}
-                      >
-                        <span>{acc.solutionTarget}</span>
-                      </div>
-                    </td>
-
-                    <td className="p-3">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                          acc.primaryMotion === 'DUAL'
-                            ? theme === 'light'
-                              ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                              : 'bg-indigo-950/80 border-indigo-500/30 text-indigo-300'
-                            : acc.primaryMotion === 'PLG'
-                            ? theme === 'light'
-                              ? 'bg-cyan-50 border-cyan-200 text-cyan-700'
-                              : 'bg-cyan-950/80 border-cyan-500/30 text-cyan-300'
-                            : theme === 'light'
-                            ? 'bg-amber-50 border-amber-200 text-amber-700'
-                            : 'bg-amber-950/80 border-amber-500/30 text-amber-300'
-                        }`}
-                      >
-                        {acc.primaryMotion}
-                      </span>
-                    </td>
-
-                    <td className="p-3">
-                      <span
-                        className={`text-[11px] uppercase font-semibold ${
-                          acc.stage === 'closed_won' || acc.stage === 'expansion'
-                            ? 'text-emerald-500 font-bold'
-                            : theme === 'light'
-                            ? 'text-slate-700'
-                            : 'text-slate-300'
-                        }`}
-                      >
-                        {acc.stage.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-
-                    <td className="p-3">
-                      <div className="flex items-baseline gap-1.5">
-                        <span
-                          className={`text-base font-bold ${
-                            theme === 'light' ? 'text-sky-700' : 'text-cyan-300'
-                          }`}
-                        >
-                          {acc.compositeScore}
-                        </span>
-                        <span className="text-[10px] text-emerald-500 font-bold">
-                          +{acc.scoreDelta7d}
-                        </span>
-                      </div>
-                    </td>
-
-                    <td className="p-3 min-w-[170px]">
-                      {/* Visual Segmented Bar */}
-                      <div
-                        className={`w-full h-2 rounded-sm overflow-hidden flex ${
-                          theme === 'light' ? 'bg-slate-200' : 'bg-slate-900'
-                        }`}
-                      >
-                        <div
-                          className="bg-cyan-400 h-full"
-                          style={{ width: `${acc.scores.productTelemetry * 0.3}%` }}
-                          title={`PLG Telemetry: ${acc.scores.productTelemetry}`}
-                        />
-                        <div
-                          className="bg-indigo-400 h-full"
-                          style={{ width: `${acc.scores.committeeMaturity * 0.25}%` }}
-                          title={`SLG Committee: ${acc.scores.committeeMaturity}`}
-                        />
-                        <div
-                          className="bg-emerald-400 h-full"
-                          style={{ width: `${acc.scores.behavioralEngagement * 0.25}%` }}
-                          title={`Behavioral: ${acc.scores.behavioralEngagement}`}
-                        />
-                        <div
-                          className="bg-amber-400 h-full"
-                          style={{ width: `${acc.scores.intentSurge * 0.1}%` }}
-                          title={`Intent: ${acc.scores.intentSurge}`}
-                        />
-                        <div
-                          className="bg-purple-400 h-full"
-                          style={{ width: `${acc.scores.firmographicFit * 0.1}%` }}
-                          title={`Fit: ${acc.scores.firmographicFit}`}
-                        />
-                      </div>
-                      <div
-                        className={`flex justify-between text-[9px] mt-1 ${
-                          theme === 'light' ? 'text-slate-500' : 'text-slate-400'
-                        }`}
-                      >
-                        <span>PLG {acc.scores.productTelemetry}</span>
-                        <span>SLG {acc.scores.committeeMaturity}</span>
-                        <span>INT {acc.scores.intentSurge}</span>
-                      </div>
-                    </td>
-
-                    <td className="p-3">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`font-bold ${
-                            acc.committee.coverageScore >= 80
-                              ? 'text-emerald-500'
-                              : acc.committee.coverageScore >= 50
-                              ? 'text-amber-500'
-                              : 'text-rose-500'
-                          }`}
-                        >
-                          {acc.committee.coverageScore}%
-                        </span>
-                        <span
-                          className={`text-[10px] ${
-                            theme === 'light' ? 'text-slate-400' : 'text-slate-400'
-                          }`}
-                        >
-                          ({acc.committee.totalIdentified}/{acc.committee.totalRequired})
-                        </span>
-                      </div>
-                    </td>
-
-                    <td
-                      className={`p-3 font-bold ${
-                        theme === 'light' ? 'text-slate-900' : 'text-white'
-                      }`}
-                    >
-                      ${(acc.estDealValue / 1000).toFixed(0)}k
-                    </td>
-
-                    <td className="p-3 text-right">
-                      <button
-                        type="button"
-                        className={`px-2.5 py-1 rounded text-[11px] inline-flex items-center gap-1 transition-colors font-semibold border ${
-                          theme === 'light'
-                            ? 'bg-sky-50 group-hover:bg-sky-100 border-sky-300 text-sky-800'
-                            : 'bg-cyan-500/10 group-hover:bg-cyan-500/20 border-cyan-500/30 text-cyan-300'
-                        }`}
-                      >
-                        <span>INSPECT</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredAccounts.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className={`p-6 text-center text-xs ${
-                        theme === 'light' ? 'text-slate-500' : 'text-slate-400'
-                      }`}
-                    >
-                      No matching demand units found for &ldquo;{searchQuery}&rdquo;.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+    <section className="score-studio-portfolio" aria-label="Demand unit score portfolio">
+      <div className="score-studio-section-head"><div><p className="score-studio-overline">PORTFOLIO</p><h2>Review demand units</h2></div><span>{filtered.length} shown of {accounts.length}</span></div>
+      <div className="score-studio-controls"><label className="score-studio-search"><Search size={18} aria-hidden="true" /><span className="sr-only">Search accounts or needs</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search account, domain, or need" /></label><label className="score-studio-select"><SlidersHorizontal size={17} aria-hidden="true" /><span className="sr-only">Filter demand units</span><select value={filter} onChange={(event) => setFilter(event.target.value as PortfolioFilter)}><option value="all">All routes</option><option value="sales">Sales lane</option><option value="marketing">Marketing lane</option><option value="hold">On hold</option><option value="coverage">Coverage gap</option></select><ChevronDown size={16} aria-hidden="true" /></label><label className="score-studio-select"><span className="sr-only">Sort demand units</span><select value={sort} onChange={(event) => setSort(event.target.value as PortfolioSort)}><option value="highest">Highest score</option><option value="lowest">Lowest score</option><option value="recent">Recently scored</option></select><ChevronDown size={16} aria-hidden="true" /></label></div>
+      <div className="score-studio-table-wrap"><table className="score-studio-table"><thead><tr><th scope="col">Account / need</th><th scope="col">Score</th><th scope="col">Fit</th><th scope="col">Intent</th><th scope="col">Coverage</th><th scope="col">Operating lane</th><th scope="col"><span className="sr-only">Review</span></th></tr></thead><tbody>{filtered.slice(0, visibleCount).map((item) => <tr key={item.id} className={item.id === selected.id ? 'selected' : ''}><td><strong>{item.accountName}</strong><span>{item.solutionTarget}</span></td><td className="score-studio-table-score">{number(scoreFor(item))}</td><td>{number(item.scoreAudit?.fit ?? item.scores.firmographicFit)}</td><td>{number(item.scoreAudit?.intent ?? item.scores.behavioralEngagement)}</td><td>{number(coverageFor(item))}</td><td><span className={'score-studio-table-route ' + (routeFor(item) === 'SALES_LANE' ? 'sales' : routeFor(item) === 'MARKETING_LANE' ? 'marketing' : 'hold')}>{routeFor(item) === 'SALES_LANE' ? 'Sales' : routeFor(item) === 'MARKETING_LANE' ? 'Marketing' : 'Hold'}</span></td><td><button type="button" onClick={() => { setSelectedId(item.id); topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} aria-label={'Review score for ' + item.accountName}>Review <ArrowRight size={15} aria-hidden="true" /></button></td></tr>)}</tbody></table>{!filtered.length && <p className="score-studio-empty">No demand units match these filters.</p>}</div>
+      {filtered.length > visibleCount && <button className="score-studio-more" type="button" onClick={() => setVisibleCount((count) => count + 20)}>Show 20 more <ChevronDown size={16} aria-hidden="true" /></button>}
+    </section>
+    <p className="score-studio-footnote">Scores prioritize demand; they are not purchase probabilities. Campaign reporting without an identified person does not increase buyer intent.</p>
+  </div>;
 };

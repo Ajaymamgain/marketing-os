@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import {
   ActiveNavTab,
   AccountDemandUnit,
@@ -10,51 +10,133 @@ import {
 import {
   MOCK_DEMAND_UNITS,
   MOCK_SIGNALS,
-  MOCK_PLAYBOOKS,
   MOCK_CONNECTORS,
   MOCK_TASKS,
 } from './data/mockData';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { AccountDrawer } from './components/AccountDrawer';
-import { DemandOverviewView } from './views/DemandOverviewView';
-import { DemandUnitScoringView } from './views/DemandUnitScoringView';
-import { DemandFunnelView } from './views/DemandFunnelView';
-import { CustomerJourneyView } from './views/CustomerJourneyView';
-import { AccountMatrixView } from './views/AccountMatrixView';
-import { BuyingCommitteesView } from './views/BuyingCommitteesView';
-import { CommitteeCoverageInspectorView } from './views/CommitteeCoverageInspectorView';
-import { PiOperationsCenterView } from './views/PiOperationsCenterView';
-import { SignalsPlaybooksView } from './views/SignalsPlaybooksView';
-import { ScoringRulesStudioView } from './views/ScoringRulesStudioView';
-import { DataConnectorsView } from './views/DataConnectorsView';
-import { TasksActivityView } from './views/TasksActivityView';
-import { WorkspaceTerminalView } from './views/WorkspaceTerminalView';
-import { LandingPageView } from './views/LandingPageView';
-import { GeminiChatbotView } from './views/GeminiChatbotView';
+import { WorkspaceErrorBoundary } from './components/WorkspaceErrorBoundary';
+const DemandOverviewView = lazy(() => import('./views/DemandOverviewView').then((module) => ({ default: module.DemandOverviewView })));
+const DemandUnitScoringView = lazy(() => import('./views/DemandUnitScoringView').then((module) => ({ default: module.DemandUnitScoringView })));
+const DemandFunnelView = lazy(() => import('./views/DemandFunnelView').then((module) => ({ default: module.DemandFunnelView })));
+const CustomerJourneyView = lazy(() => import('./views/CustomerJourneyView').then((module) => ({ default: module.CustomerJourneyView })));
+const AccountMatrixView = lazy(() => import('./views/AccountMatrixView').then((module) => ({ default: module.AccountMatrixView })));
+const BuyingCommitteesView = lazy(() => import('./views/BuyingCommitteesView').then((module) => ({ default: module.BuyingCommitteesView })));
+const CommitteeCoverageInspectorView = lazy(() => import('./views/CommitteeCoverageInspectorView').then((module) => ({ default: module.CommitteeCoverageInspectorView })));
+const DecisionOperationsView = lazy(() => import('./views/DecisionOperationsView').then((module) => ({ default: module.DecisionOperationsView })));
+const AudiencePlaybookView = lazy(() => import('./views/AudiencePlaybookView').then((module) => ({ default: module.AudiencePlaybookView })));
+const ScoringRulesStudioView = lazy(() => import('./views/ScoringRulesStudioView').then((module) => ({ default: module.ScoringRulesStudioView })));
+const DataConnectorsView = lazy(() => import('./views/DataConnectorsView').then((module) => ({ default: module.DataConnectorsView })));
+const TasksActivityView = lazy(() => import('./views/TasksActivityView').then((module) => ({ default: module.TasksActivityView })));
+const WorkspaceTerminalView = lazy(() => import('./views/WorkspaceTerminalView').then((module) => ({ default: module.WorkspaceTerminalView })));
+const LandingPageView = lazy(() => import('./views/LandingPageView').then((module) => ({ default: module.LandingPageView })));
+const JevAutomationView = lazy(() => import('./views/JevAutomationView').then((module) => ({ default: module.JevAutomationView })));
+const SignalSimulatorView = lazy(() => import('./views/SignalSimulatorView').then((module) => ({ default: module.SignalSimulatorView })));
 import { playCadBlip, playCadConfirm, playCadClick } from './utils/audio';
 import { PanelLeft } from 'lucide-react';
+import {
+  fetchDemandUnits,
+  fetchScoringPolicy,
+  fetchTasks,
+  fetchJevAutomationStatus,
+  JevAutomationStatus,
+  fetchConnectors,
+  fetchSignals,
+  fetchPlaybooks,
+  DEMO_DATA_ENABLED,
+} from './services/api';
+
+const AccountSegmentsView = lazy(() => import('./views/AccountSegmentsView').then(module => ({default:module.AccountSegmentsView})));
+
+const ConversionWorkspaceView = lazy(() => import('./views/ConversionWorkspaceView').then(m => ({default: m.ConversionWorkspaceView})));
+const CompanyIntelligenceView = lazy(() => import('./views/CompanyIntelligenceView').then(m=>({default:m.CompanyIntelligenceView})));
+
+const hashToTab: Record<string, ActiveNavTab> = {
+  '': 'LANDING',
+  'landing': 'LANDING',
+  'overview': 'OVERVIEW',
+  'waterfall': 'OVERVIEW',
+  'demand-units': 'DEMAND_UNITS',
+  'funnel': 'FUNNEL',
+  'journey': 'JOURNEY',
+  'matrix': 'ACCOUNTS',
+  'accounts': 'ACCOUNTS',
+  'committees': 'COMMITTEES',
+  'committee': 'COMMITTEES',
+  'coverage': 'COVERAGE',
+  'pi': 'DECISION_OPS',
+  'decisions': 'DECISION_OPS',
+  'decision-inbox': 'DECISION_OPS',
+  'copilot': 'DECISION_OPS',
+  'jev-automation': 'AUTOMATION',
+  'automation': 'AUTOMATION',
+  'pi-ops': 'DECISION_OPS',
+  'signals': 'SIGNALS',
+  'simulator': 'SIMULATOR',
+  'conversions': 'CONVERSIONS',
+  'playbooks': 'SIGNALS',
+  'rules': 'RULES',
+  'connectors': 'CONNECTORS',
+  'segments': 'SEGMENTS',
+  'intelligence':'INTELLIGENCE',
+  'enrichment':'INTELLIGENCE',
+  'tasks': 'TASKS',
+  'terminal': 'TERMINAL',
+};
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveNavTab>('LANDING');
-  const [accounts, setAccounts] = useState<AccountDemandUnit[]>(MOCK_DEMAND_UNITS);
-  const [signals, setSignals] = useState<TelemetrySignal[]>(MOCK_SIGNALS);
-  const [playbooks, setPlaybooks] = useState<AutomationPlaybook[]>(MOCK_PLAYBOOKS);
-  const [connectors, setConnectors] = useState<DataConnector[]>(MOCK_CONNECTORS);
-  const [tasks, setTasks] = useState<OperationalTask[]>(MOCK_TASKS);
-  const [selectedAccount, setSelectedAccount] = useState<AccountDemandUnit | null>(null);
-  const [isSimulating, setIsSimulating] = useState(true);
-  const [searchFilter, setSearchFilter] = useState('');
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
-  const [isSidebarCompact, setIsSidebarCompact] = useState(false);
-  const [externalAiPrompt, setExternalAiPrompt] = useState<string | undefined>(undefined);
-
-  const handleTriggerAiPrompt = (prompt: string) => {
-    playCadConfirm();
-    setExternalAiPrompt(prompt);
-    setActiveTab('CHATBOT');
+  const mainRef = React.useRef<HTMLElement>(null);
+  const [activeTab, setActiveTabState] = useState<ActiveNavTab>(() => hashToTab[window.location.hash.replace(/^#/, '').toLowerCase()] || 'LANDING');
+  const setActiveTab = (tab: ActiveNavTab) => {
+    const routes: Record<ActiveNavTab, string> = {LANDING:'landing', OVERVIEW:'overview', DEMAND_UNITS:'demand-units', FUNNEL:'funnel', JOURNEY:'journey', ACCOUNTS:'matrix', COMMITTEES:'committees', COVERAGE:'coverage', DECISION_OPS:'decisions', SIGNALS:'playbooks', SIMULATOR:'simulator', CONVERSIONS:'conversions', RULES:'rules', CONNECTORS:'connectors', SEGMENTS:'segments', INTELLIGENCE:'intelligence', TASKS:'tasks', TERMINAL:'terminal', AUTOMATION:'automation'};
+    setActiveTabState(tab);
+    if (window.location.hash !== `#${routes[tab]}`) window.location.hash = routes[tab];
   };
+  const [accounts, setAccounts] = useState<AccountDemandUnit[]>(DEMO_DATA_ENABLED ? MOCK_DEMAND_UNITS : []);
+  const [signals, setSignals] = useState<TelemetrySignal[]>(DEMO_DATA_ENABLED ? MOCK_SIGNALS : []);
+  const [playbooks, setPlaybooks] = useState<AutomationPlaybook[]>([]);
+  const [connectors, setConnectors] = useState<DataConnector[]>(DEMO_DATA_ENABLED ? MOCK_CONNECTORS : []);
+  const [tasks, setTasks] = useState<OperationalTask[]>(DEMO_DATA_ENABLED ? MOCK_TASKS : []);
+  const [selectedAccount, setSelectedAccount] = useState<AccountDemandUnit | null>(null);
+  const [isSimulating, setIsSimulating] = useState(DEMO_DATA_ENABLED);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
+  const [isSidebarHidden, setIsSidebarHidden] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const [isSidebarCompact, setIsSidebarCompact] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [scoreFormula, setScoreFormula] = useState('fit × 0.35 + intent × 0.40 + coverage × 0.25');
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<JevAutomationStatus | null>(null);
+
+  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [activeTab]);
+
+  // Research-view parameters belong to Intelligence, not to the demand dashboard.
+  useEffect(() => {
+    if (activeTab === 'INTELLIGENCE') return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('intelligence_view')) {
+      url.searchParams.delete('intelligence_view');
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }, [activeTab]);
+
+  // URL Hash Sync for deep linking between views
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#/, '').toLowerCase();
+
+      if (hash in hashToTab) {
+        setActiveTabState(hashToTab[hash]);
+      }
+    };
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const handleToggleTheme = () => {
     playCadClick();
@@ -71,6 +153,49 @@ export function App() {
     setIsSidebarCompact((prev) => !prev);
   };
 
+  const independentView = ['CONNECTORS','SEGMENTS','AUTOMATION','INTELLIGENCE','CONVERSIONS'].includes(activeTab);
+
+  // Load live data from Dual Motion backend on mount
+  useEffect(() => {
+    if (independentView) { setIsLoading(false); return; }
+    let isMounted = true;
+    async function loadBackendData() {
+      setIsLoading(true);
+      try {
+        const [liveUnits, liveTasks, liveConnectors, liveSignals, livePlaybooks, policy] = await Promise.all([
+          fetchDemandUnits(),
+          fetchTasks(),
+          fetchConnectors(),
+          fetchSignals(),
+          fetchPlaybooks(),
+          fetchScoringPolicy(),
+        ]);
+        if (!isMounted) return;
+        if (policy?.formula) setScoreFormula(policy.formula.replaceAll('×', ' × ').replaceAll('  ', ' '));
+        setAccounts(liveUnits);
+        setTasks(liveTasks);
+        setConnectors(liveConnectors);
+        setSignals(liveSignals);
+        setPlaybooks(livePlaybooks);
+        setSelectedAccount((current) => current ? liveUnits.find((unit) => unit.id === current.id) || null : null);
+        setLastUpdated(new Date().toISOString());
+        setLoadError('');
+        const status = await fetchJevAutomationStatus();
+        if (isMounted) setRuntime(status);
+      } catch (err) {
+        if (isMounted) setLoadError(err instanceof Error ? err.message : 'Workspace data is unavailable.');
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    }
+    loadBackendData();
+    const refresh = window.setInterval(() => { if (document.visibilityState === 'visible') loadBackendData(); }, 60_000);
+    return () => {
+      window.clearInterval(refresh);
+      isMounted = false;
+    };
+  }, [refreshNonce,independentView]);
+
   // Live Telemetry Simulator Effect
   useEffect(() => {
     if (!isSimulating) return;
@@ -78,6 +203,7 @@ export function App() {
     const interval = setInterval(() => {
       // Pick a random account to slightly fluctuate scores or telemetry
       setAccounts((prevAccounts) => {
+        if (!prevAccounts.length) return prevAccounts;
         const targetIdx = Math.floor(Math.random() * prevAccounts.length);
         const updated = [...prevAccounts];
         const acc = { ...updated[targetIdx] };
@@ -93,13 +219,11 @@ export function App() {
           activeUsers7d: Math.max(5, acc.telemetry.activeUsers7d + (delta > 0 ? 1 : 0)),
         };
 
-        // Recalculate composite
+        // Enforce Dual Motion invariant: composite = fit*0.35 + intent*0.40 + coverage*0.25
         acc.compositeScore = Math.round(
-          acc.scores.productTelemetry * 0.3 +
-          acc.scores.committeeMaturity * 0.25 +
-          acc.scores.behavioralEngagement * 0.25 +
-          acc.scores.intentSurge * 0.1 +
-          acc.scores.firmographicFit * 0.1
+          (acc.scores.firmographicFit ?? 85) * 0.35 +
+          (acc.scores.intentSurge ?? 80) * 0.40 +
+          (acc.committee.coverageScore ?? 0) * 0.25
         );
 
         updated[targetIdx] = acc;
@@ -115,34 +239,11 @@ export function App() {
     return () => clearInterval(interval);
   }, [isSimulating]);
 
-  const handleToggleTask = (taskId: string) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t))
-    );
-  };
-
-  const handleAddTask = (taskData: Omit<OperationalTask, 'id' | 'createdAt'>) => {
-    const newTask: OperationalTask = {
-      ...taskData,
-      id: `TSK-${Date.now().toString().slice(-4)}`,
-      createdAt: 'Just now',
-    };
-    setTasks((prev) => [newTask, ...prev]);
-  };
-
-  const handleTriggerPlaybook = (playbookId: string, _accountName: string) => {
+  const handleTriggerPlaybook = (_playbookId: string, _accountName: string) => {
     playCadConfirm();
-    setPlaybooks((prev) =>
-      prev.map((p) =>
-        p.id === playbookId
-          ? {
-              ...p,
-              executionsCount: (p.executionsCount ?? p.executionCount ?? 0) + 1,
-              executionCount: (p.executionCount ?? p.executionsCount ?? 0) + 1,
-            }
-          : p
-      )
-    );
+    if (selectedAccount) sessionStorage.setItem('dm-playbook-demand-unit', selectedAccount.id);
+    setSelectedAccount(null);
+    window.location.hash = 'playbooks';
   };
 
   // Filter accounts if search query exists
@@ -155,24 +256,16 @@ export function App() {
     );
   });
 
-  return (
-    <div className={`min-h-screen ${theme === 'light' ? 'theme-light' : 'theme-dark'} bg-[#040811] text-slate-100 flex flex-col cad-grid-bg relative selection:bg-cyan-500/30 selection:text-cyan-200 transition-colors duration-200`}>
-      {/* CAD Blueprint Precision Background Crosshairs & Corner Guides */}
-      <div className="fixed top-2 left-2 text-[9px] font-mono text-cyan-500/30 pointer-events-none select-none z-50">
-        + [X:000 Y:000]
-      </div>
-      <div className="fixed top-2 right-2 text-[9px] font-mono text-cyan-500/30 pointer-events-none select-none z-50">
-        [X:1920 Y:000] +
-      </div>
-      <div className="fixed bottom-2 left-2 text-[9px] font-mono text-cyan-500/30 pointer-events-none select-none z-50">
-        + [X:000 Y:1080]
-      </div>
-      <div className="fixed bottom-2 right-2 text-[9px] font-mono text-cyan-500/30 pointer-events-none select-none z-50">
-        [X:1920 Y:1080] +
-      </div>
+  const inWorkspace = activeTab !== 'LANDING';
 
+  return (
+    <div className={activeTab === 'LANDING'
+      ? 'min-h-screen bg-white text-[#1c1917] flex flex-col selection:bg-[#fe551b]/20 selection:text-[#fe551b]'
+      : 'hex-app theme-light flex min-h-[100dvh] flex-col bg-[#f6f7f9] text-[#1c1f26]'}>
+<a href="#main-content" className="dm-skip-link" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>Skip to main content</a>
       {/* Primary View Switching: Landing Page (Outside) vs. Workstation Console (Inside) */}
       {activeTab === 'LANDING' ? (
+        <Suspense fallback={<div className="dm-empty" role="status">Loading product website…</div>}>
         <LandingPageView
           onNavigateTab={(tab) => setActiveTab(tab)}
           onSelectAccount={(acc) => setSelectedAccount(acc)}
@@ -180,13 +273,20 @@ export function App() {
           theme={theme}
           onToggleTheme={handleToggleTheme}
         />
+        </Suspense>
       ) : (
         <>
           {/* Main Top Header inside Workstation Console */}
           <Header
             activeTab={activeTab}
+            independentView={independentView}
+            isLoading={isLoading}
+            lastUpdated={lastUpdated}
+            integrationMode={runtime?.execution_policy.integration_mode}
             isSimulating={isSimulating}
+            simulationAvailable={DEMO_DATA_ENABLED}
             onToggleSimulation={() => setIsSimulating(!isSimulating)}
+            onRefresh={() => setRefreshNonce((current) => current + 1)}
             onSearchAccount={(query) => setSearchFilter(query)}
             activeAccountCount={accounts.length}
             theme={theme}
@@ -201,12 +301,12 @@ export function App() {
             {/* Floating edge button to restore navigation when hidden */}
             {isSidebarHidden && (
               <button
+                type="button"
                 onClick={handleToggleSidebar}
-                className="fixed left-0 top-24 z-30 flex items-center gap-1.5 px-2.5 py-2 rounded-r bg-[#091526] border-y border-r border-cyan-400/50 text-cyan-300 text-xs font-mono shadow-[0_0_12px_rgba(6,182,212,0.3)] hover:bg-cyan-950 transition-all cursor-pointer"
-                title="Show Navigation Stations"
+                className="fixed left-0 top-20 z-30 hidden md:flex items-center gap-1.5 rounded-r-md border border-l-0 border-[#e6e8ee] bg-white px-2.5 py-2 text-[12px] text-[#1c1f26] hover:bg-[#f6f7f9]"
               >
-                <PanelLeft className="w-4 h-4 text-cyan-400 animate-pulse" />
-                <span className="text-[10px] font-bold">SHOW STATIONS (13)</span>
+                <PanelLeft className="h-4 w-4" />
+                Show nav
               </button>
             )}
 
@@ -214,8 +314,8 @@ export function App() {
             {!isSidebarHidden && (
               <Navigation
                 activeTab={activeTab}
-                onSelectTab={(tab) => setActiveTab(tab)}
-                urgentTaskCount={tasks.filter((t) => !t.completed && (t.priority === 'URGENT' || t.priority === 'URGENT_SURGE')).length}
+                onSelectTab={(tab) => { setActiveTab(tab); if (window.matchMedia('(max-width: 767px)').matches) setIsSidebarHidden(true); }}
+                urgentTaskCount={tasks.filter((t) => !t.completed && !t.archived && (t.priority === 'URGENT' || t.priority === 'URGENT_SURGE')).length}
                 criticalSignalCount={signals.filter((s) => s.severity === 'CRITICAL').length}
                 isCompact={isSidebarCompact}
                 onToggleCompact={handleToggleCompact}
@@ -225,7 +325,11 @@ export function App() {
             )}
 
             {/* Dynamic Content Body */}
-            <main className="flex-1 p-4 sm:p-6 min-w-0 overflow-y-auto">
+            <main ref={mainRef} tabIndex={-1} id="main-content" className={`min-w-0 flex-1 overflow-y-auto ${activeTab === 'CONVERSIONS' ? '' : 'px-4 py-6 sm:px-8'}`}>
+              <WorkspaceErrorBoundary key={activeTab}>
+              <Suspense fallback={<div className="dm-notice" role="status">Loading workspace view…</div>}>
+              {loadError && !independentView && <div role="alert" className="dm-notice dm-notice-error mb-6 flex flex-wrap items-center justify-between gap-3"><div><strong>Workspace data could not refresh</strong><p>{loadError} {lastUpdated ? 'The last successful snapshot is still displayed.' : ''}</p></div><div className="flex gap-2"><button className="dm-button" onClick={() => setRefreshNonce((current) => current + 1)}>Retry</button><button className="dm-button" onClick={() => setActiveTab('TERMINAL')}>Sign in</button></div></div>}
+              {isLoading && !independentView && !lastUpdated && <div role="status" className="dm-notice mb-6">Loading your workspace…</div>}
               {activeTab === 'OVERVIEW' && (
                 <DemandOverviewView
                   accounts={visibleAccounts}
@@ -234,6 +338,8 @@ export function App() {
                   theme={theme}
                   onSelectAccount={(acc) => setSelectedAccount(acc)}
                   onNavigateTab={(tab) => setActiveTab(tab)}
+                  scoreFormula={scoreFormula}
+                  runtime={runtime}
                 />
               )}
 
@@ -242,8 +348,7 @@ export function App() {
               accounts={visibleAccounts}
               theme={theme}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-              onTriggerAiPrompt={handleTriggerAiPrompt}
+              onApplied={() => setRefreshNonce((value) => value + 1)}
             />
           )}
 
@@ -264,6 +369,7 @@ export function App() {
           {activeTab === 'ACCOUNTS' && (
             <AccountMatrixView
               accounts={visibleAccounts}
+              loading={isLoading && !lastUpdated}
               theme={theme}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
               onNavigateTab={(tab) => setActiveTab(tab)}
@@ -274,6 +380,8 @@ export function App() {
             <BuyingCommitteesView
               accounts={visibleAccounts}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
+
+              onApplied={() => setRefreshNonce((value) => value + 1)}
             />
           )}
 
@@ -284,8 +392,8 @@ export function App() {
             />
           )}
 
-          {activeTab === 'PI_OPS' && (
-            <PiOperationsCenterView
+          {activeTab === 'DECISION_OPS' && (
+            <DecisionOperationsView
               signals={signals}
               accounts={visibleAccounts}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
@@ -293,27 +401,32 @@ export function App() {
           )}
 
           {activeTab === 'SIGNALS' && (
-            <SignalsPlaybooksView
-              playbooks={playbooks}
-              accounts={visibleAccounts}
-              onTriggerPlaybook={handleTriggerPlaybook}
-            />
+            <AudiencePlaybookView accounts={visibleAccounts} loading={isLoading} />
           )}
+
+          {activeTab === 'SIMULATOR' && (
+            <>
+              <div className="mb-4 flex justify-end"><a className="dm-button" href="#conversions">Open conversion simulator</a></div>
+              <SignalSimulatorView theme={theme} />
+            </>
+          )}
+          {activeTab === 'CONVERSIONS' && <ConversionWorkspaceView refreshKey={refreshNonce} />}
+
 
           {activeTab === 'RULES' && (
-            <ScoringRulesStudioView accounts={visibleAccounts} />
+            <ScoringRulesStudioView accounts={visibleAccounts} onApplied={() => setRefreshNonce((value) => value + 1)} />
           )}
 
+          {activeTab === 'SEGMENTS' && <AccountSegmentsView key={refreshNonce} />}
+          {activeTab === 'INTELLIGENCE' && <CompanyIntelligenceView key={refreshNonce} />}
           {activeTab === 'CONNECTORS' && (
-            <DataConnectorsView connectors={connectors} />
+            <DataConnectorsView key={refreshNonce} connectors={connectors} />
           )}
 
           {activeTab === 'TASKS' && (
             <TasksActivityView
               tasks={tasks}
               accounts={visibleAccounts}
-              onToggleTask={handleToggleTask}
-              onAddTask={handleAddTask}
               onSelectAccount={(acc) => setSelectedAccount(acc)}
             />
           )}
@@ -322,16 +435,11 @@ export function App() {
             <WorkspaceTerminalView accounts={visibleAccounts} />
           )}
 
-          {activeTab === 'CHATBOT' && (
-            <GeminiChatbotView
-              accounts={visibleAccounts}
-              theme={theme}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-              onSelectAccount={(acc) => setSelectedAccount(acc)}
-              externalPrompt={externalAiPrompt}
-              onClearExternalPrompt={() => setExternalAiPrompt(undefined)}
-            />
+          {activeTab === 'AUTOMATION' && (
+            <JevAutomationView theme={theme} />
           )}
+              </Suspense>
+              </WorkspaceErrorBoundary>
         </main>
       </div>
 
@@ -343,26 +451,6 @@ export function App() {
         onTriggerPlaybook={handleTriggerPlaybook}
       />
 
-      {/* Engineering Blueprint Footer */}
-      <footer className="border-t border-cyan-500/20 bg-[#060b13] px-4 py-2.5 text-[11px] font-mono text-slate-400">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <span className="text-cyan-400 font-semibold">
-              MARKETING OPERATIONS OS // SYS.01
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="hidden sm:inline-block">CAD SPEC: 80x80 GRID</span>
-            <span className="text-slate-600">|</span>
-            <span className="text-emerald-400">PQL+SQL INTEGRITY: 99.98%</span>
-          </div>
-
-          <div className="flex items-center gap-3 text-slate-500">
-            <span>ENGINEERING BUILD: 2026.4.1</span>
-            <span>•</span>
-            <span>RESTRICTED INTERNAL ARCHITECTURE</span>
-          </div>
-        </div>
-      </footer>
       </>
       )}
     </div>

@@ -1,0 +1,456 @@
+import React, { useEffect, useState, useRef } from 'react';
+import { ArrowRight, RefreshCw, Sparkles, Database, ShieldCheck, Activity, CheckCircle2, Send, Plus, Trash2, ChevronDown, ChevronUp, Layers, X } from 'lucide-react';
+import { AccountDemandUnit, CustomPlaybook } from '../types';
+import { JevDecisionCard } from '../components/JevDecisionCard';
+import { PlaybookSkillPanel, PlaybookRunHistory } from './PlaybookSkillPanel';
+import {
+  AudiencePlaybookConfig,
+  AudiencePlaybookPreview,
+  MarketoPlaybookAsset,
+  MarketoPlaybookAssets,
+  applyAudiencePlaybook,
+  fetchAudiencePlaybookConfig,
+  fetchMarketoPlaybookAssets,
+  fetchMarketoStaticLists,
+  previewAudiencePlaybook,
+  saveAudiencePlaybookConfig,
+  fetchCustomPlaybooks,
+  createCustomPlaybook,
+  previewCustomPlaybook,
+  toggleCustomPlaybook,
+  deleteCustomPlaybook,
+} from '../services/api';
+
+interface Props { accounts: AccountDemandUnit[]; loading?: boolean }
+
+export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = false }) => {
+  const [selectedKey, setSelectedKey] = useState(() => sessionStorage.getItem('dm-playbook-demand-unit') || accounts[0]?.id || '');
+  const [listId, setListId] = useState('');
+  const [playCode, setPlayCode] = useState('*');
+  const [lists, setLists] = useState<Array<{ id: number; name: string }>>([]);
+  const [plan, setPlan] = useState<AudiencePlaybookPreview | null>(null);
+  const [config, setConfig] = useState<AudiencePlaybookConfig | null>(null);
+  const [role, setRole] = useState('member');
+  const [busy, setBusy] = useState<'lists' | 'apply' | 'config' | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [showAllRecipes, setShowAllRecipes] = useState(false);
+  const [customBusy, setCustomBusy] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const canEdit = role === 'owner';
+  const [previewMatches, setPreviewMatches] = useState<NonNullable<CustomPlaybook['matched_units']>>([]);
+  const [matching, setMatching] = useState(false);
+  const [matchError, setMatchError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [assets, setAssets] = useState<MarketoPlaybookAssets | null>(null);
+  const [assetQuery, setAssetQuery] = useState('');
+  const [assetError, setAssetError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
+
+  // Custom Noul Playbooks state
+  const [customLoadError, setCustomLoadError] = useState<string | null>(null);
+  const [customPlaybooks, setCustomPlaybooks] = useState<CustomPlaybook[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [expandedCustomId, setExpandedCustomId] = useState<string | null>(null);
+
+  // Custom playbook modal form state
+  const [formName, setFormName] = useState('Executive Surge Acceleration');
+  const [formDescription, setFormDescription] = useState('Immediate executive alignment when an automated evaluation supports stage progression.');
+  const [formAction, setFormAction] = useState('Dispatch VP-level Outbound & Prioritize Meeting Request');
+  const [formLane, setFormLane] = useState('SALES_LANE');
+  const [formSlaHours, setFormSlaHours] = useState(4);
+  const [formNoulQuestion, setFormNoulQuestion] = useState('progress');
+  const [formNoulThreshold, setFormNoulThreshold] = useState(0.70);
+  const [formNoulOperator, setFormNoulOperator] = useState('>=');
+  const [formMinFit, setFormMinFit] = useState(50);
+  const [formMinIntent, setFormMinIntent] = useState(50);
+  const [isSavingCustom, setIsSavingCustom] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!busy && document.visibilityState === 'visible') setRefreshVersion((value) => value + 1);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!accounts.some((account) => account.id === selectedKey)) {
+      setSelectedKey(accounts[0]?.id || ''); setPlan(null); setConfig(null); setListId(''); setResult(null);
+    }
+  }, [accounts, selectedKey, loading]);
+  useEffect(() => { if (selectedKey) sessionStorage.setItem('dm-playbook-demand-unit', selectedKey); }, [selectedKey]);
+  useEffect(() => {
+    fetch('/v1/auth/me', { credentials: 'include' }).then((res) => res.ok ? res.json() : null)
+      .then((session) => setRole(session?.role || 'member')).catch(() => setRole('member'));
+  }, []);
+  useEffect(() => {
+    loadLists();
+  }, []);
+  useEffect(() => {
+    if (!selectedKey) { setConfig(null); setListId(''); setConfigLoading(false); return; }
+    let cancelled = false;
+    setConfigLoading(true); setConfig(null); setListId('');
+    fetchAudiencePlaybookConfig(selectedKey, playCode)
+      .then((next) => { if (!cancelled) { setConfig(next); setListId(next.marketo_list_id ? String(next.marketo_list_id) : ''); } })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load playbook settings'); })
+      .finally(() => { if (!cancelled) setConfigLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedKey, playCode]);
+  useEffect(() => {
+    if (!selectedKey || configLoading || !config) { setPlan(null); setPreviewLoading(false); return; }
+    let cancelled = false;
+    setPreviewLoading(true); setError(null);
+    previewAudiencePlaybook(selectedKey, listId, playCode)
+      .then((next) => {
+        if (!cancelled) {
+          setPlan(next);
+          if (!listId && next.marketo_list_id) {
+            setListId(String(next.marketo_list_id));
+          }
+          setCheckedAt(new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
+        }
+      })
+      .catch((cause) => { if (!cancelled) { setPlan(null); setError(cause instanceof Error ? cause.message : 'Preview unavailable'); } })
+      .finally(() => { if (!cancelled) setPreviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedKey, listId, playCode, refreshVersion, configLoading, config]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchMarketoPlaybookAssets()
+      .then((next) => { if (!cancelled) setAssets(next); })
+      .catch((cause) => { if (!cancelled) setAssetError(cause instanceof Error ? cause.message : 'Could not load Marketo programs'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadCustomPlaybooks = async () => {
+    try {
+      const pbs = await fetchCustomPlaybooks();
+      setCustomPlaybooks(pbs); setCustomLoadError(null);
+    } catch (err) {
+      setCustomLoadError(err instanceof Error ? err.message : 'Could not load custom rules');
+    }
+  };
+
+  useEffect(() => {
+    loadCustomPlaybooks();
+  }, [refreshVersion]);
+
+  const handleToggleCustom = async (id: string) => {
+    if (!canEdit || customBusy) return;
+    setCustomBusy(id);
+    try {
+      await toggleCustomPlaybook(id);
+      loadCustomPlaybooks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Toggle failed');
+    } finally { setCustomBusy(null); }
+  };
+
+  const handleDeleteCustom = async (id: string) => {
+    if (!canEdit || customBusy) return;
+    setCustomBusy(id);
+    try {
+      await deleteCustomPlaybook(id);
+      loadCustomPlaybooks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    } finally { setCustomBusy(null); }
+  };
+
+  const handleCreateCustom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit || !formName.trim()) return;
+    setIsSavingCustom(true);
+    setCustomError(null);
+    try {
+      await createCustomPlaybook({
+        name: formName,
+        description: formDescription,
+        action: formAction,
+        lane: formLane,
+        sla_hours: Number(formSlaHours),
+        noul_question: formNoulQuestion,
+        noul_threshold: Number(formNoulThreshold),
+        noul_operator: formNoulOperator,
+        min_fit: Number(formMinFit),
+        min_intent: Number(formMinIntent),
+        is_active: true,
+      });
+      setIsModalOpen(false);
+      loadCustomPlaybooks();
+      setResult(`Playbook "${formName}" saved as an eligibility rule. Recorded progression estimate ${formNoulOperator} ${formNoulThreshold.toFixed(2)}.`);
+    } catch (err) {
+      setCustomError(err instanceof Error ? err.message : 'Failed to create playbook');
+    } finally {
+      setIsSavingCustom(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    dialogRef.current?.showModal();
+    dialogRef.current?.querySelector<HTMLInputElement>('input')?.focus();
+    return () => dialogRef.current?.close();
+  }, [isModalOpen]);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    let cancelled = false;
+    setMatching(true); setPreviewMatches([]); setMatchError(null);
+    const timer = window.setTimeout(() => {
+      previewCustomPlaybook({name: 'Draft eligibility rule', lane: formLane,
+        noul_question: formNoulQuestion, noul_operator: formNoulOperator,
+        noul_threshold: formNoulThreshold, min_fit: formMinFit, min_intent: formMinIntent})
+        .then((next) => { if (!cancelled) setPreviewMatches(next.matched_units); })
+        .catch((cause) => { if (!cancelled) setMatchError(cause instanceof Error ? cause.message : 'Eligibility preview unavailable'); })
+        .finally(() => { if (!cancelled) setMatching(false); });
+    }, 300);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [isModalOpen, formLane, formNoulQuestion, formNoulOperator, formNoulThreshold, formMinFit, formMinIntent, refreshVersion]);
+
+  const loadLists = async () => {
+    setBusy('lists'); setError(null);
+    try { setLists(await fetchMarketoStaticLists()); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load Marketo lists'); }
+    finally { setBusy(null); }
+  };
+
+  const currentListId = listId.trim();
+  const validListId = /^[1-9]\d{0,14}$/.test(currentListId);
+  const mappingSaved = validListId && String(config?.marketo_list_id ?? '') === currentListId;
+
+  const apply = async () => {
+    if (!canEdit || !plan?.can_apply || !mappingSaved || previewLoading || busy) return;
+    setBusy('apply'); setError(null); setResult(null);
+    try {
+      const next = await applyAudiencePlaybook(selectedKey, currentListId, playCode);
+      setResult(`${next.status === 'completed' ? 'Reconciled' : 'Partial result'} in Marketo: ${next.applied_count} confirmed, ${next.skipped_count} unverified, ${Math.max(0, next.requested_count - next.resolved_count)} unresolved.`);
+      setRefreshVersion((v) => v + 1);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Audience update failed'); }
+    finally { setBusy(null); }
+  };
+
+  const saveMapping = async (enabled: boolean) => {
+    if (!canEdit || !selectedKey || !validListId || busy || configLoading) return;
+    setBusy('config'); setError(null); setResult(null);
+    try {
+      const next = await saveAudiencePlaybookConfig(selectedKey, currentListId, enabled, playCode);
+      setConfig(next);
+      setRefreshVersion((value) => value + 1);
+      setResult(enabled ? `Mapping saved for ${next.need_key}.${plan?.mode !== 'local' ? ' This workspace is in dry run; no provider writes will occur.' : ' The worker will check eligibility before each update.'}` : `Mapping saved for ${next.need_key}; automatic updates are paused.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save the mapping'); }
+    finally { setBusy(null); }
+  };
+
+
+  const trace = plan?.data_trace;
+  const step = plan?.recommendation.operational_next_action;
+  const delivery = !plan ? 'Checking delivery' : plan.mode !== 'local' ? 'Dry run · no provider writes' : !config?.enabled ? 'Delivery paused' : plan.blockers.length ? 'Mapping enabled · blocked' : 'Ready for delivery';
+  const decisionCurrent = plan?.recommendation.jev_applied && plan.recommendation.decision_current;
+  const recipes = plan?.playbook_library || [];
+  const displayedRecipes = showAllRecipes ? recipes : recipes.filter((recipe) => recipe.selected || ['EVENT_FOLLOW_UP', 'CONTENT_NURTURE', 'PRICING_FOLLOW_UP'].includes(recipe.code));
+  const friendly = (value: string) => value.replaceAll('_', ' ');
+  const date = (value?: string | null) => value ? new Date(value).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Not recorded';
+
+  return <div className="dm-playbooks">
+    <div className="dm-page-head">
+      <div><h1>Playbooks</h1><p>Review the next action, connect its destination, and track what the provider confirms.</p></div>
+      <div className="dm-playbook-actions">
+        <button className="dm-button dm-button-primary" disabled={!canEdit} onClick={() => setIsModalOpen(true)}>
+          <Plus size={16}/> Create eligibility rule
+        </button>
+        <button type="button" className="dm-button dm-button-secondary" disabled={!plan}
+          onClick={() => document.getElementById('dm-automation-setup')?.scrollIntoView({block:'start'})}>Map a destination</button>
+        <button type="button" className="dm-button dm-button-secondary" disabled={!plan}
+          onClick={() => document.getElementById('playbook-runs')?.scrollIntoView({block:'start'})}>Run history <ArrowRight size={16}/></button>
+      </div>
+    </div>
+    <PlaybookSkillPanel refreshKey={refreshVersion} onApproved={() => setRefreshVersion(value => value + 1)} />
+    <div className="dm-status-strip"><span><span className="dm-dot" style={{background: plan?.mode === 'local' && plan.can_apply ? '#3c8b77' : '#9a6b16'}}/> {delivery}</span><span>Refreshes every 15 seconds{checkedAt ? ` · Checked ${checkedAt}` : ''}</span></div>
+    <section className="dm-panel dm-selector">
+      <label>Account & demand need<select value={selectedKey} onChange={(event) => { setSelectedKey(event.target.value); setPlan(null); setConfig(null); setListId(''); setResult(null); }}><option value="">Select a demand unit</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.accountName} · {account.solutionTarget}</option>)}</select></label>
+      <button className="dm-button dm-button-secondary" disabled={busy !== null || previewLoading || configLoading} onClick={() => setRefreshVersion((value) => value + 1)}><RefreshCw size={16} className={previewLoading ? 'animate-spin' : ''}/> Refresh</button>
+    </section>
+    {error && <div role="alert" className="dm-notice dm-notice-warning">{error}</div>}
+    {result && <div role="status" className="dm-notice">{result}</div>}
+    {!plan && selectedKey && !error && <div className="dm-panel dm-loading" role="status">Reading the stored decision and its evidence…</div>}
+    {plan && <>
+      <div className="dm-playbook-grid">
+        <section className="dm-panel dm-decision">
+          <div className="dm-section-heading"><h2>Next best action</h2><span className="dm-badge">{decisionCurrent ? 'Decision + policy gates' : 'Historical recommendation'}</span></div>
+          <h3>{step?.title || 'Awaiting an evaluated next step'}</h3><p>{step?.detail || 'The scoring workflow will record a decision when this unit is evaluated.'}</p>
+          <div className="dm-owner"><span>Responsible team</span><strong>{step ? friendly(step.owner) : 'Not assigned'}</strong><span className="dm-badge">Recommendation</span></div>
+          <div className="dm-strategy-grid">{[['Campaign strategy',plan.recommendation.campaign.name],['Audience segment',plan.recommendation.segment.name],['Preferred channel',plan.recommendation.channel.name]].map(([label,value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+          <div className="dm-audience-decision"><Sparkles size={16}/><div><strong>Audience decision</strong><p>{plan.recommendation.next_action?.reason || 'No audience destination has been evaluated yet.'}</p></div></div>
+          <p className="dm-footnote">Decision recorded {date(plan.recommendation.decided_at)} · {friendly(plan.routing_state)} · {plan.stage}</p>
+        </section>
+        <section className="dm-panel">
+          <div className="dm-section-heading"><h2>Why this decision?</h2><span className="dm-badge">Score / 100</span></div>
+          <div className="dm-score-bars">{(['fit','intent','coverage'] as const).map((metric) => <div key={metric}><div><span>{metric}</span><strong>{plan.recommendation.score[metric].toFixed(1)}</strong></div><meter min={0} max={100} value={plan.recommendation.score[metric]} aria-label={`${metric} score`}/></div>)}</div>
+          <div className="dm-total"><span>Composite score</span><strong>{plan.recommendation.score.composite.toFixed(1)}</strong></div>
+          <ul className="dm-evidence">{plan.evidence.map((item,index) => <li key={index}>{item}</li>)}</ul>
+          <p className="dm-footnote">Scores are computed from recorded evidence. The next action is selected within coverage and consent rules.</p>
+        </section>
+      </div>
+      <section className="dm-flow" aria-label="Automated playbook lifecycle">
+        {[
+          {icon:Database, label:'01 · Evidence received', value:`${trace?.signal_count ?? '—'} signals`, detail:trace?.sample_account ? 'Fictional sample account' : 'Recorded workspace evidence'},
+          {icon:Activity, label:'02 · Decision', value:decisionCurrent ? plan.recommendation.campaign.name : 'Awaiting a current decision', detail:`Score ${plan.recommendation.score.composite.toFixed(1)} / 100`},
+          {icon:Sparkles, label:'03 · Skill and destination', value:plan.delivery_transport === 'mcp' ? 'Marketo MCP' : plan.delivery_transport === 'legacy' ? 'Existing Marketo adapter' : 'Connect Marketo MCP', detail:config?.marketo_list_id ? `List #${config.marketo_list_id}` : 'Save a dedicated list'},
+          {icon:ShieldCheck, label:'04 · Reconciliation', value:delivery, detail:'Consent and eligibility checked before each update'},
+        ].map((item) => <div key={item.label} className="dm-flow-step"><item.icon size={19}/><span>{item.label}</span><strong>{item.value}</strong><small>{item.detail}</small></div>)}
+      </section>
+
+      {/* Jev Decision Primitives Card (Choice, Score, Noul) */}
+      <details className="dm-panel dm-setup"><summary>Recorded decision evaluation <span>{decisionCurrent ? 'Current decision' : 'Evaluation required before activation'}</span></summary><JevDecisionCard jevDecision={plan.jev_decision} /></details>
+      <div className="dm-playbook-grid">
+        <section className="dm-panel"><div className="dm-section-heading"><h2>Data behind the playbook</h2><span className="dm-badge">{trace?.sample_account ? 'Sample account' : 'Workspace records'}</span></div>
+          <p className="dm-muted">Marketo activities become signals after identity and need mapping. Ad exports provide campaign reporting; they do not identify an individual buyer.</p>
+          <div className="dm-source-tags">{trace?.sources.map((source) => <span key={source.name}>{source.name}<strong>{source.count.toLocaleString()}</strong></span>)}</div>
+          <ol className="dm-timeline">{trace?.recent_signals.map((signal,index) => <li key={`${signal.at}-${index}`}><span className="dm-timeline-dot"/><div><strong>{friendly(signal.type)}</strong><span>{signal.source} · {date(signal.at)}</span></div></li>)}</ol>
+          {!trace?.recent_signals.length && <p className="dm-empty">No recorded signals for this account and need.</p>}
+          <a href="#simulator" className="dm-text-link">Inspect the supplied CSV exports <ArrowRight size={14}/></a>
+        </section>
+        <section className="dm-panel"><div className="dm-section-heading"><h2>Audience & execution</h2><span className="dm-badge">{delivery}</span></div>
+          <div className="dm-contact-counts">{[['Known contacts',plan.candidate_contacts],[plan.action === 'remove' ? 'Removal candidates' : 'Eligible contacts',plan.eligible_contacts],['Consent exclusions',plan.excluded_for_consent]].map(([label,value]) => <div key={label}><strong>{value}</strong><span>{label}</span></div>)}</div>
+          {plan.blockers.length > 0 && <div className="dm-notice dm-notice-warning"><strong>Delivery requirements</strong><ul>{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
+          <h3 className="dm-small-heading">Recent integration jobs</h3>
+          <div className="dm-job-list">{trace?.recent_jobs.map((job) => <div key={job.id}><span><strong>{friendly(job.action)}</strong><small>{job.destination} · {date(job.at)}</small></span><span className="dm-badge">{friendly(job.status)}</span></div>)}</div>
+          {!trace?.recent_jobs.length && <p className="dm-empty">No delivery jobs recorded. A recommendation is not a delivery receipt.</p>}
+        </section>
+      </div>
+      <section className="dm-panel">
+        <div className="dm-section-heading"><h2>Marketing operations playbooks</h2><span className="dm-badge">Automatically evaluated</span></div>
+        <p className="dm-muted">The strategy is selected automatically from evidence. Map dedicated destinations once. When the strategy changes, the worker reconciles eligible membership and removes contacts from plays that no longer apply. Sales, coverage, and customer plays create operational recommendations; they do not automatically send nurture.</p>
+        <div className="dm-recipe-grid">{displayedRecipes.map((recipe) => <article key={recipe.code} className={recipe.selected ? 'dm-recipe dm-recipe-selected' : 'dm-recipe'}>
+          <div className="dm-section-heading"><span className="dm-badge">{recipe.selected ? 'Selected by current decision' : 'Available strategy'}</span><span className="dm-badge">{recipe.mapping.enabled ? 'Mapping enabled' : recipe.mapping.marketo_list_id ? 'Mapping paused' : 'Not mapped'}</span></div>
+          <h3>{recipe.name}</h3><p>{recipe.detail}</p>
+
+        </article>)}</div><div className="dm-playbook-actions dm-library-actions"><button className="dm-button dm-button-secondary" aria-expanded={showAllRecipes} onClick={() => setShowAllRecipes(!showAllRecipes)}>{showAllRecipes ? 'Show key plays' : `View all ${recipes.length} strategies`}</button><button className="dm-button dm-button-secondary" onClick={() => {document.getElementById('dm-automation-setup')?.scrollIntoView({behavior:'smooth',block:'start'});}}>Manage automated destinations <ArrowRight size={15}/></button></div>
+      </section>
+
+      <section className="dm-panel">
+        <div className="dm-section-heading"><div><h2>Custom eligibility rules</h2><p className="dm-muted">Match demand units using a current progression evaluation, lane, fit, intent, and verified coverage.</p></div><span className="dm-badge">Qualification only</span></div>
+        <p className="dm-muted">Action notes describe the intended workflow. Custom rules do not send campaigns or execute provider actions; use the mapped built-in strategies for audience delivery.</p>
+        {customLoadError && <p role="alert" className="dm-notice dm-notice-warning">{customLoadError} <button className="dm-button dm-button-secondary" onClick={loadCustomPlaybooks}>Retry rules</button></p>}
+        {!customLoadError && !customPlaybooks.length && <p className="dm-empty">No custom rules saved. Create a rule to inspect which demand units qualify.</p>}
+        <div className="dm-recipe-grid">{customPlaybooks.map((cpb) => <article key={cpb.id} className="dm-recipe dm-custom-rule">
+          <div className="dm-section-heading"><span className="dm-badge">{cpb.is_active ? 'Enabled rule' : 'Paused rule'}</span><span className="dm-badge">{friendly(cpb.lane)} · {cpb.sla_hours}h target</span></div>
+          <h3>{cpb.name}</h3><p>{cpb.description}</p>
+          <dl className="dm-rule-facts"><div><dt>Progress probability</dt><dd>{cpb.noul_operator} {Math.round(cpb.noul_threshold * 100)}%</dd></div><div><dt>Minimum fit / intent</dt><dd>{cpb.min_fit} / {cpb.min_intent}</dd></div><div><dt>Action note</dt><dd>{cpb.action}</dd></div></dl>
+          <div className="dm-playbook-actions"><button className="dm-button dm-button-secondary" aria-expanded={expandedCustomId === cpb.id} onClick={() => setExpandedCustomId(expandedCustomId === cpb.id ? null : cpb.id)}>{expandedCustomId === cpb.id ? <ChevronUp size={15}/> : <ChevronDown size={15}/>} {cpb.matched_units_count ?? 0} qualifying demand units</button>
+          <button className="dm-button dm-button-secondary" disabled={!canEdit || customBusy !== null} onClick={() => handleToggleCustom(cpb.id)}>{cpb.is_active ? 'Pause' : 'Enable'}</button><button className="dm-button dm-button-secondary" disabled={!canEdit || customBusy !== null} onClick={() => handleDeleteCustom(cpb.id)} aria-label={`Delete rule ${cpb.name}`}><Trash2 size={15}/></button></div>
+          {expandedCustomId === cpb.id && <div className="dm-match-list">{cpb.matched_units?.length ? cpb.matched_units.map((m) => <div key={m.demand_unit_key}><strong>{m.account_domain}</strong><span>{friendly(m.need_key)} · {Math.round(m.noul_score * 100)}% progress · score {m.composite_score}</span></div>) : <p>No demand units meet this rule with a current, supported Decision evaluation.</p>}</div>}
+        </article>)}</div>
+      </section>
+
+      <details className="dm-panel dm-setup"><summary>How Marketo runs the play <span>Lists, filters, and campaign flows</span></summary>
+        <div className="dm-recipe-grid">
+          <article className="dm-recipe"><h3>1. Static list · who enters</h3><p>Dual Motion adds eligible, consented contacts to the auto-managed list. Event, content, and pricing plays also require matching activity for that person. It removes them when consent, segment eligibility, or the chosen play changes. A list update itself does not send an email.</p></article>
+          <article className="dm-recipe"><h3>2. Smart List · who qualifies</h3><p>Marketo evaluates filters such as Member of List, lifecycle status, and consent. Membership is computed from those rules; there is no direct add-to-Smart-List action.</p></article>
+          <article className="dm-recipe"><h3>3. Smart Campaign · what happens</h3><p>Configure and activate an approved campaign in Marketo using Added to List or a scheduled Member of List filter. Its flow can send nurture, update program status, or alert an owner. Set qualification rules to prevent repeated sends.</p></article>
+        </div><p className="dm-footnote">Program membership is separate from list membership. Campaign flows and Smart List rules must be configured in Marketo. Direct campaign execution and program enrollment are not implied by the list worker.</p>
+      </details>
+      <section id="dm-automation-setup" className="dm-panel dm-setup">
+        <div className="dm-section-heading">
+          <div>
+            <h2>Destination mapping</h2>
+            <p className="dm-muted">Enter a dedicated Marketo static list for this play. The membership skill verifies the list and reconciles approved additions and removals.</p>
+          </div>
+        </div>
+        <div className="dm-playbook-grid" style={{ marginBottom: '16px' }}>
+          <div className="dm-selector" style={{ margin: 0, flexDirection: 'column', alignItems: 'stretch' }}>
+            <label style={{ width: '100%' }}>Playbook scope
+              <select value={playCode} disabled={busy !== null} onChange={(event) => { setPlayCode(event.target.value); setConfig(null); setListId(''); }}>
+                <option value="*">General marketing audience (all eligible plays)</option>
+                {plan.playbook_library?.map((recipe) => (
+                  <option key={recipe.code} value={recipe.code}>
+                    {recipe.name} ({recipe.mapping.enabled ? 'Active' : 'Standby'})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="dm-footnote" style={{ marginTop: '4px' }}>Targeting: <strong>{plan.need_key.replace('_', ' ')}</strong> · Stage: <strong>{plan.stage}</strong></p>
+          </div>
+          <div className="dm-selector" style={{ margin: 0, flexDirection: 'column', alignItems: 'stretch' }}>
+            <label>Marketo static list ID
+              <input className="pb-list-input" inputMode="numeric" list="pb-list-options" placeholder="e.g. 1001"
+                value={listId} disabled={!canEdit || busy !== null || configLoading || Boolean(config?.marketo_list_id)}
+                onChange={event => {setListId(event.target.value); setResult(null);}}/>
+              <datalist id="pb-list-options">{lists.map(list => <option key={list.id} value={list.id}>{list.name}</option>)}</datalist>
+            </label>
+            <p className="dm-footnote" style={{ marginTop: '4px' }}>Mapped list: <strong>{currentListId ? `#${currentListId}` : 'None selected'}</strong> · The worker reconciles eligible additions and removals.</p>
+          </div>
+        </div>
+        <div className="dm-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', borderTop: '1px solid #e6ebf2', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            <CheckCircle2 size={16} />
+            <span>Delivery Status: <strong style={{ color: config?.enabled ? '#16a34a' : '#d97706' }}>{delivery}</strong></span>
+          </div>
+          <div className="pb-mapping-buttons">
+            {!mappingSaved && <button className="dm-button dm-button-primary" onClick={() => saveMapping(false)}
+              disabled={!canEdit || !validListId || !plan.delivery_connection_ready || busy !== null || configLoading}>Save list mapping</button>}
+            {config?.enabled ? (
+              <button className="dm-button dm-button-secondary" onClick={() => saveMapping(false)} disabled={!canEdit || busy !== null || configLoading}>Pause delivery</button>
+            ) : mappingSaved && plan.mode === 'local' && (
+              <button className="dm-button dm-button-primary" onClick={() => saveMapping(true)}
+                disabled={!canEdit || !plan.delivery_connection_ready || busy !== null || configLoading}>Enable automatic delivery</button>
+            )}
+            <button className="dm-button dm-button-secondary" onClick={apply} disabled={!canEdit || !mappingSaved || !plan.can_apply || busy !== null || previewLoading || configLoading}>
+              <Send size={13} className={busy === 'apply' ? 'animate-spin' : ''}/>
+              {busy === 'apply' ? 'Applying…' : `Apply ${plan.action} once`}
+            </button>
+          </div>
+        </div>
+      </section>
+      <PlaybookRunHistory demandUnitKey={selectedKey} refreshKey={refreshVersion} />
+      <details className="dm-panel dm-setup"><summary>Provider destinations <span>Provider availability</span></summary><div className="dm-provider-list">{plan.providers.map((provider) => <div key={provider.id}><div><strong>{provider.name}</strong><p>{provider.detail}</p></div><span className={provider.status === 'ready' ? 'dm-badge dm-badge-ready' : 'dm-badge'}>{provider.status}</span></div>)}</div></details>
+    </>}
+    <details className="dm-panel dm-setup"><summary>Browse Marketo assets <span>{assets ? `${assets.counts.programs} programs · ${assets.counts.smart_campaigns} campaigns · ${assets.counts.smart_lists} smart lists` : assetError ? 'Catalog unavailable' : 'Loading catalog…'}</span></summary>{assetError ? <p role="alert" className="dm-muted">{assetError}</p> : <MarketoAssetCatalog assets={assets} query={assetQuery} onQuery={setAssetQuery}/>}</details>
+    {!selectedKey && <div className="dm-panel dm-empty">Select a demand unit to inspect its evidence and automation.</div>}
+
+    {isModalOpen && <dialog ref={dialogRef} className="dm-playbook-dialog" aria-labelledby="dm-rule-title" onCancel={() => setIsModalOpen(false)}>
+      <div className="dm-section-heading"><div><p className="dm-eyebrow">PLAYBOOK QUALIFICATION</p><h2 id="dm-rule-title">Create an eligibility rule</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close eligibility rule" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>
+      <p className="dm-muted">Use recorded decision evaluations to find qualifying demand units. Saving an action note does not execute it.</p>
+      <form onSubmit={handleCreateCustom} className="dm-rule-form">
+        {customError && <p role="alert" className="dm-notice dm-notice-warning">{customError}</p>}
+        <label>Rule name<input required autoFocus maxLength={200} value={formName} onChange={(e) => setFormName(e.target.value)}/></label>
+        <label>Purpose<textarea rows={2} value={formDescription} onChange={(e) => setFormDescription(e.target.value)}/></label>
+        <div className="dm-rule-columns"><label>Operating lane<select value={formLane} onChange={(e) => setFormLane(e.target.value)}><option value="SALES_LANE">Sales follow-up</option><option value="MARKETING_LANE">Marketing nurture</option><option value="HOLD">Hold</option></select></label><label>Response target<select value={formSlaHours} onChange={(e) => setFormSlaHours(Number(e.target.value))}>{[4,12,24,48].map((hours) => <option key={hours} value={hours}>{hours} hours</option>)}</select></label></div>
+        <label>Action note<input required value={formAction} onChange={(e) => setFormAction(e.target.value)}/><small>Describes the intended action; no campaign is dispatched by this rule.</small></label>
+        <fieldset><legend><Layers size={16}/> Entry criteria</legend><p className="dm-muted">Current automated evaluation, matching lane, and coverage above zero are always required. Missing or expired judgments never qualify.</p>
+          <div className="dm-rule-columns"><label>Progression estimate<select value={formNoulQuestion} onChange={(e) => setFormNoulQuestion(e.target.value)}><option value="progress">Stage progression probability</option></select></label><label>Condition<select value={formNoulOperator} onChange={(e) => setFormNoulOperator(e.target.value)}><option value=">=">At least</option><option value="<=">At most</option></select></label></div>
+          <label>Progress threshold <strong>{Math.round(formNoulThreshold * 100)}%</strong><input type="range" min={0} max={1} step={0.05} value={formNoulThreshold} onChange={(e) => setFormNoulThreshold(Number(e.target.value))}/></label>
+          <div className="dm-rule-columns"><label>Minimum fit <strong>{formMinFit} / 100</strong><input type="range" min={0} max={100} step={5} value={formMinFit} onChange={(e) => setFormMinFit(Number(e.target.value))}/></label><label>Minimum intent <strong>{formMinIntent} / 100</strong><input type="range" min={0} max={100} step={5} value={formMinIntent} onChange={(e) => setFormMinIntent(Number(e.target.value))}/></label></div>
+        </fieldset>
+        <div className="dm-match-preview" aria-live="polite"><h3>{matching ? 'Checking stored decisions…' : matchError ? 'Preview unavailable' : `${previewMatches.length} qualifying demand units`}</h3>{matchError ? <p role="alert">{matchError}</p> : <div className="dm-match-list">{previewMatches.map((m) => <div key={m.demand_unit_key}><strong>{m.account_domain}</strong><span>{friendly(m.need_key)} · {Math.round(m.noul_score * 100)}% progress</span></div>)}{!matching && !previewMatches.length && <p>No current decisions meet all criteria. This preview uses the same server-side checks as saved rules.</p>}</div>}</div>
+        <div className="dm-playbook-actions dm-dialog-footer"><button type="button" className="dm-button dm-button-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button><button type="submit" className="dm-button dm-button-primary" disabled={!canEdit || isSavingCustom}>{isSavingCustom ? 'Saving…' : 'Save eligibility rule'}</button></div>
+      </form>
+    </dialog>}
+
+  </div>;
+};
+
+function matches(asset: MarketoPlaybookAsset, query: string) {
+  const haystack = `${asset.name} ${asset.folder || ''} ${asset.type || ''} ${asset.status || ''}`.toLowerCase();
+  return haystack.includes(query.trim().toLowerCase());
+}
+
+function MarketoAssetCatalog({ assets, query, onQuery }: { assets: MarketoPlaybookAssets | null; query: string; onQuery: (value: string) => void }) {
+  const columns: Array<{ title: string; rows: MarketoPlaybookAsset[]; detail: (row: MarketoPlaybookAsset) => string }> = [
+    { title: 'Programs', rows: assets?.programs || [], detail: (row) => [row.type, row.status, row.folder].filter(Boolean).join(' · ') },
+    { title: 'Smart campaigns', rows: assets?.smart_campaigns || [], detail: (row) => [row.is_active ? 'Active' : row.status, row.smart_list_id ? `Smart list ${row.smart_list_id}` : ''].filter(Boolean).join(' · ') },
+    { title: 'Smart lists', rows: assets?.smart_lists || [], detail: (row) => row.folder || 'No folder' },
+  ];
+  return <section className="dm-asset-catalog">
+    <div className="dm-section-heading"><div><h3>Marketo playbook catalog</h3><p className="dm-muted">{assets ? `${assets.counts.programs} programs · ${assets.counts.smart_campaigns} campaigns · ${assets.counts.smart_lists} smart lists` : 'Loading catalog…'}</p></div><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Filter by name" aria-label="Filter Marketo assets" /></div>
+    <div className="dm-recipe-grid">{columns.map((column) => {
+      const rows = column.rows.filter((row) => matches(row, query));
+      return <section key={column.title} className="dm-asset-column"><h4>{column.title} <span>{rows.length}</span></h4><ul>{rows.map((row) => <li key={row.id}><strong>{row.name}</strong><span>{column.detail(row)} · #{row.id}</span></li>)}{assets && !rows.length && <li>No matching assets.</li>}</ul></section>;
+    })}</div>
+  </section>;
+}

@@ -7,7 +7,7 @@ import {
   BarChart3,
   Zap,
   ShieldCheck,
-  Bot,
+  Orbit,
   Terminal,
   RotateCcw,
   Sparkles,
@@ -37,7 +37,6 @@ interface AutonomousDemandSimulatorProps {
   accounts: AccountDemandUnit[];
   theme?: 'dark' | 'light';
   onNavigateTab?: (tab: any) => void;
-  onTriggerAiPrompt?: (prompt: string) => void;
   onSelectAccount?: (account: AccountDemandUnit) => void;
   isInnerView?: boolean;
 }
@@ -54,7 +53,6 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
   accounts,
   theme = 'dark',
   onNavigateTab,
-  onTriggerAiPrompt,
   onSelectAccount,
   isInnerView = false,
 }) => {
@@ -361,7 +359,7 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
                 <ShieldCheck className="w-3 h-3" />
                 <span>INFOSEC</span>
               </div>
-              <div className="text-[9px] text-emerald-300">SOC2 PASS</div>
+              <div className="text-[9px] text-emerald-300">DEMO GATE</div>
             </div>
           </div>
         </div>
@@ -771,17 +769,13 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
               </div>
             </div>
 
-            {/* Link to Station & AI Analysis */}
+            {/* Link to the autonomous decision plane */}
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={() => {
-                  const prompt = `Perform a comprehensive autonomous diagnosis of this demand unit simulator state: Telemetry=${telemetry}, Committee=${committee}, Behavioral=${behavioral}, Intent=${intent}, Fit=${fit}. Composite Score is ${compositeScore}/100 in ${stageInfo.label}. The buying committee quorum has ${Object.values(personaEngaged).filter(Boolean).length} of 6 roles engaged (Single-thread warning=${isSingleThreaded}, Infosec blocked=${isInfosecBlocked}). Detail the exact next 3 autonomous playbooks Marketing Ops and Sales should execute.`;
-                  if (onTriggerAiPrompt) {
-                    onTriggerAiPrompt(prompt);
-                  } else if (onNavigateTab) {
-                    onNavigateTab('CHATBOT');
-                  }
+                  playCadConfirm();
+                  onNavigateTab?.('AUTOMATION');
                 }}
                 className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-mono text-xs font-bold border transition-all cursor-pointer shadow-md ${
                   theme === 'light'
@@ -789,8 +783,8 @@ export const AutonomousDemandSimulator: React.FC<AutonomousDemandSimulatorProps>
                     : 'bg-cyan-950/90 hover:bg-cyan-900 border-cyan-400/80 text-cyan-200 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
                 }`}
               >
-                <Bot className="w-4 h-4 text-cyan-400 animate-pulse" />
-                <span>ASK GEMINI COPILOT TO DIAGNOSE SIMULATED VECTORS</span>
+                <Orbit className="w-4 h-4 text-cyan-400" />
+                <span>VIEW JEV AUTOMATION DECISION LOG</span>
               </button>
 
               {isInnerView ? (
