@@ -494,7 +494,9 @@ export function App() {
                   {activeTab === 'JOURNEY' && (
                     <CustomerJourneyView
                       accounts={visibleAccounts}
+                      signals={signals}
                       onSelectAccount={(acc) => setSelectedAccount(acc)}
+                      onNavigateTab={(tab) => setActiveTab(tab)}
                     />
                   )}
 
