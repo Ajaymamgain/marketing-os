@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock3,
   FileCheck2,
+  GitBranch,
   KeyRound,
   ListChecks,
   RefreshCw,
@@ -24,6 +25,11 @@ import {
   type WorkflowSkillScope,
   type WorkspaceSkill,
 } from './OperationsAgentBoard';
+import {
+  formatActorLabel,
+  type JobDetailPayload,
+  type StepActor,
+} from './OperationsWorkflowVisualization';
 
 type Fact = {
   field: string;
@@ -47,6 +53,7 @@ type Job = {
   workflow: string;
   target: string;
   status: string;
+  trigger?: 'manual' | 'automatic' | string | null;
   created_at?: string | null;
   updated_at: string;
   completed_at?: string | null;
@@ -66,6 +73,7 @@ type Step = {
   sequence: number;
   tool: string;
   status: string;
+  actor?: StepActor;
   created_at?: string | null;
   completed_at?: string | null;
   updated_at?: string | null;
@@ -278,6 +286,10 @@ export function OperationsJobsPanel({
   const [detail, setDetail] = useState<{ job: Job; steps: Step[] } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+
+  const [vizWorkflowId, setVizWorkflowId] = useState<string | null>(null);
+  const [vizPinnedCaseId, setVizPinnedCaseId] = useState<string | null>(null);
+  const [vizFocusTick, setVizFocusTick] = useState(0);
 
   const [selectedTriggers, setSelectedTriggers] = useState<string[]>([]);
   const [draftDirty, setDraftDirty] = useState(false);
@@ -669,6 +681,13 @@ export function OperationsJobsPanel({
         inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 60);
     }
+  };
+
+  const handleOpenCaseVisualization = (job: Job) => {
+    setVizWorkflowId(job.workflow);
+    setVizPinnedCaseId(job.id);
+    setVizFocusTick((t) => t + 1);
+    setTab('board');
   };
 
   const focusDecisionSettings = () => {
@@ -1615,6 +1634,18 @@ export function OperationsJobsPanel({
                             {inspectedJob.target || 'Not recorded'}
                           </strong>{' '}
                           · Updated {formatStamp(inspectedJob.updated_at)}
+                          {inspectedJob.trigger &&
+                            ['manual', 'automatic'].includes(inspectedJob.trigger.toLowerCase()) && (
+                              <>
+                                {' '}
+                                · Trigger:{' '}
+                                <strong className="font-medium text-[#0f172a]">
+                                  {inspectedJob.trigger.toLowerCase() === 'automatic'
+                                    ? 'Automatic'
+                                    : 'Manual'}
+                                </strong>
+                              </>
+                            )}
                           {(inspectedJob.skill_name || inspectedJob.skill_id) && (
                             <>
                               {' '}
@@ -1630,6 +1661,14 @@ export function OperationsJobsPanel({
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          className="dm-button"
+                          onClick={() => handleOpenCaseVisualization(inspectedJob)}
+                        >
+                          <GitBranch size={14} aria-hidden="true" />
+                          Workflow visualization
+                        </button>
                         {inspectedJob.status === 'draft' && (
                           <button
                             type="button"
@@ -1967,6 +2006,11 @@ export function OperationsJobsPanel({
                                     <span className="font-semibold text-[#0f172a]">
                                       {step.sequence}. {STEP_NAMES[step.tool] || 'Operations check'}
                                     </span>
+                                    {step.actor && (
+                                      <span className="text-[11px] font-medium text-[#64748b]">
+                                        · {formatActorLabel(step.actor)}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2.5 tabular-nums">
                                     <span className={`font-semibold ${statusTextTone(step.status)}`}>
@@ -2138,6 +2182,14 @@ export function OperationsJobsPanel({
               setTab('instructions');
             }}
             onNavigateTab={onNavigateTab}
+            fetchJobDetail={(jobId) =>
+              read<JobDetailPayload>(`/v1/operations/jobs/${encodeURIComponent(jobId)}`)
+            }
+            isActive={tab === 'board'}
+            externalWorkflowId={vizWorkflowId}
+            externalPinnedCaseId={vizPinnedCaseId}
+            externalVizMode="recorded"
+            externalVizFocusTick={vizFocusTick}
             formatStamp={formatStamp}
             formatStatusLabel={formatStatusLabel}
             statusTextTone={statusTextTone}

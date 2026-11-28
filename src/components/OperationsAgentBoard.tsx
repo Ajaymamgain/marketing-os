@@ -11,6 +11,11 @@ import {
   X,
 } from 'lucide-react';
 import type { ActiveNavTab } from '../types';
+import {
+  OperationsWorkflowVisualization,
+  type JobDetailPayload,
+  type VisualizationMode,
+} from './OperationsWorkflowVisualization';
 
 export type WorkspaceSkill = {
   id: string;
@@ -33,6 +38,7 @@ export type RecordedSubagent = {
   id?: string;
   name?: string;
   role?: string;
+  objective?: string;
   status?: string;
   summary?: string;
   completed_at?: string | null;
@@ -44,6 +50,7 @@ export type OperationsBoardJob = {
   workflow: string;
   target: string;
   status: string;
+  trigger?: 'manual' | 'automatic' | string | null;
   created_at?: string | null;
   updated_at: string;
   completed_at?: string | null;
@@ -150,6 +157,12 @@ interface OperationsAgentBoardProps {
   onFilterInboxByWorkflow: (workflowId: string) => void;
   onOpenInstructions: (workflowId: string) => void;
   onNavigateTab?: (tab: ActiveNavTab) => void;
+  fetchJobDetail: (jobId: string) => Promise<JobDetailPayload>;
+  isActive?: boolean;
+  externalWorkflowId?: string | null;
+  externalPinnedCaseId?: string | null;
+  externalVizMode?: VisualizationMode;
+  externalVizFocusTick?: number;
   formatStamp: (value?: string | null) => string;
   formatStatusLabel: (status?: string | null) => string;
   statusTextTone: (status?: string | null) => string;
@@ -185,6 +198,12 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
   onFilterInboxByWorkflow,
   onOpenInstructions,
   onNavigateTab,
+  fetchJobDetail,
+  isActive = true,
+  externalWorkflowId,
+  externalPinnedCaseId,
+  externalVizMode,
+  externalVizFocusTick = 0,
   formatStamp,
   formatStatusLabel,
   statusTextTone,
@@ -260,6 +279,13 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
       return true;
     });
   }, [skills, skillWorkflowFilter, skillStatusFilter]);
+
+  useEffect(() => {
+    if (!externalVizFocusTick || !externalWorkflowId) return;
+    if (workflows.some((wf) => wf.id === externalWorkflowId)) {
+      setSelectedWorkflowId(externalWorkflowId);
+    }
+  }, [externalVizFocusTick, externalWorkflowId, workflows]);
 
   useEffect(() => {
     if (editorMode === 'closed') return;
@@ -668,40 +694,67 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
           })}
         </ul>
 
-        {/* COMPACT WORKFLOW INSPECTION AREA (12-column aligned: Template & Tool Scope | Run Evidence) */}
+        {/* COMPACT WORKFLOW INSPECTION AREA (Header -> Workflow Visualization -> Template & Tool Scope | Run Evidence) */}
         <div
-          className="mt-4 grid grid-cols-1 divide-y divide-[#e2e8f0] rounded-lg border border-[#e2e8f0] bg-[#f8fafc]/60 lg:grid-cols-12 lg:divide-x lg:divide-y-0"
+          className="mt-4 overflow-hidden rounded-lg border border-[#e2e8f0] bg-white"
           aria-label={`Inspection details for ${inspectedWorkflow.title}`}
         >
-          {/* Left 7 cols: Template sequence + Read-only tool scope */}
-          <div className="space-y-4 p-4 sm:p-5 lg:col-span-7">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <p className="text-[11px] font-medium text-[#64748b]">
-                  Selected built-in workflow
-                </p>
-                <h4 className="mt-0.5 text-sm font-semibold text-[#0f172a]">
-                  {inspectedWorkflow.title}
-                </h4>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs">
-                <button
-                  type="button"
-                  className="font-semibold text-[#1d4ed8] hover:underline"
-                  onClick={() => onSelectWorkflowForNewCase(inspectedWorkflow.id)}
-                >
-                  Preselect in New case
-                </button>
-                <button
-                  type="button"
-                  className="font-medium text-[#475569] hover:text-[#0f172a]"
-                  onClick={() => onOpenInstructions(inspectedWorkflow.id)}
-                >
-                  Edit instructions
-                </button>
-              </div>
+          {/* Selected Workflow Header */}
+          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[#e2e8f0] bg-[#f8fafc]/80 px-4 py-3.5 sm:px-5">
+            <div>
+              <p className="text-[11px] font-medium text-[#64748b]">
+                Selected built-in workflow
+              </p>
+              <h4 className="mt-0.5 text-sm font-semibold text-[#0f172a]">
+                {inspectedWorkflow.title}
+              </h4>
             </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <button
+                type="button"
+                className="font-semibold text-[#1d4ed8] hover:underline"
+                onClick={() => onSelectWorkflowForNewCase(inspectedWorkflow.id)}
+              >
+                Preselect in New case
+              </button>
+              <button
+                type="button"
+                className="font-medium text-[#475569] hover:text-[#0f172a]"
+                onClick={() => onOpenInstructions(inspectedWorkflow.id)}
+              >
+                Edit instructions
+              </button>
+            </div>
+          </div>
 
+          {/* Workflow Visualization (Workflow plan template + Recorded run receipts) */}
+          <div className="border-b border-[#e2e8f0]">
+            <OperationsWorkflowVisualization
+              workflow={inspectedWorkflow}
+              workflowJobs={inspectedWorkflowJobs}
+              workflowTools={inspectedToolScope}
+              fetchJobDetail={fetchJobDetail}
+              pinnedCaseId={
+                externalWorkflowId === inspectedWorkflow.id ? externalPinnedCaseId : null
+              }
+              requestedMode={
+                externalWorkflowId === inspectedWorkflow.id ? externalVizMode : undefined
+              }
+              focusRequestTick={
+                externalWorkflowId === inspectedWorkflow.id ? externalVizFocusTick : 0
+              }
+              isActive={isActive}
+              onOpenCaseInInbox={onInspectJobInInbox}
+              onPreselectNewCase={(wfId) => onSelectWorkflowForNewCase(wfId)}
+              formatStamp={formatStamp}
+              formatStatusLabel={formatStatusLabel}
+              statusTextTone={statusTextTone}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 divide-y divide-[#e2e8f0] bg-[#f8fafc]/60 lg:grid-cols-12 lg:divide-x lg:divide-y-0">
+            {/* Left 7 cols: Template sequence + Read-only tool scope */}
+            <div className="space-y-4 p-4 sm:p-5 lg:col-span-7">
             {/* Template sequence explicitly labeled as a template */}
             <div>
               <p className="text-xs font-semibold text-[#334155]">
@@ -874,6 +927,7 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
                 </button>
               </div>
             )}
+            </div>
           </div>
         </div>
       </section>
