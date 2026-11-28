@@ -196,6 +196,7 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
 
   // Skill editor state
   const [editorMode, setEditorMode] = useState<EditorMode>('closed');
+  const [editorFocusTick, setEditorFocusTick] = useState(0);
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [editingRevision, setEditingRevision] = useState<number | undefined>(undefined);
   const [editingStatus, setEditingStatus] = useState<string>('draft');
@@ -263,7 +264,7 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
   useEffect(() => {
     if (editorMode === 'closed') return;
     const timer = window.setTimeout(() => {
-      editorSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      editorSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (editorMode === 'create' || editorMode === 'edit') {
         skillNameInputRef.current?.focus();
       } else {
@@ -271,11 +272,12 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
       }
     }, 30);
     return () => window.clearTimeout(timer);
-  }, [editorMode, editingSkillId]);
+  }, [editorMode, editingSkillId, editorFocusTick]);
 
   const openCreateSkill = (initialWorkflow?: string) => {
     if (!canEditSkills || skillsUnavailable) return;
     setEditorMode('create');
+    setEditorFocusTick((n) => n + 1);
     setEditingSkillId(null);
     setEditingRevision(undefined);
     setEditingStatus('draft');
@@ -293,6 +295,7 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
   const openSkill = (skill: WorkspaceSkill) => {
     const isDraft = skill.status === 'draft';
     setEditorMode(isDraft && canEditSkills ? 'edit' : 'view');
+    setEditorFocusTick((n) => n + 1);
     setEditingSkillId(skill.id);
     setEditingRevision(skill.revision);
     setEditingStatus(skill.status);
@@ -310,6 +313,7 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
   const openDuplicateSkill = (skill: WorkspaceSkill) => {
     if (!canEditSkills || skillsUnavailable) return;
     setEditorMode('create');
+    setEditorFocusTick((n) => n + 1);
     setEditingSkillId(null);
     setEditingRevision(undefined);
     setEditingStatus('draft');
@@ -510,19 +514,31 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
     <div className="divide-y divide-[#e2e8f0]">
       {/* SECTION 1: BUILT-IN WORKFLOW BOARD (12-column ledger on desktop, stacked list on mobile) */}
       <section className="p-5 sm:p-6" aria-labelledby="ops-agent-board-heading">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <div>
-            <h3 id="ops-agent-board-heading" className="text-base font-semibold text-[#0f172a]">
-              Agent Board
-            </h3>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+              <h3 id="ops-agent-board-heading" className="text-base font-semibold text-[#0f172a]">
+                Agent Board
+              </h3>
+              <span className="text-xs font-medium tabular-nums text-[#64748b]">
+                {workflows.length} built-in workflows
+              </span>
+            </div>
             <p className="mt-0.5 text-xs text-[#64748b]">
               Six fixed read-only workflows backed by workspace readiness and recorded case history.
               Select a workflow to inspect its template sequence, tool scope, or latest run evidence.
             </p>
           </div>
-          <span className="text-xs font-medium tabular-nums text-[#64748b]">
-            {workflows.length} built-in workflows
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="dm-button dm-button-primary whitespace-nowrap shrink-0"
+              disabled={!canEditSkills || skillsUnavailable}
+              onClick={() => openCreateSkill(selectedWorkflowId)}
+            >
+              <Plus size={14} /> Create skill
+            </button>
+          </div>
         </div>
 
         {/* Desktop 12-column column headers */}
@@ -864,7 +880,7 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
 
       {/* SECTION 2: REUSABLE WORKSPACE SKILLS (List + Owner-Only Authoring Editor) */}
       <section className="p-5 sm:p-6" aria-labelledby="ops-workspace-skills-heading">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <h3 id="ops-workspace-skills-heading" className="text-base font-semibold text-[#0f172a]">
               Workspace skills
@@ -875,16 +891,11 @@ export const OperationsAgentBoard: React.FC<OperationsAgentBoardProps> = ({
               calls and does not run a case.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="dm-button dm-button-primary whitespace-nowrap shrink-0"
-              disabled={!canEditSkills || skillsUnavailable}
-              onClick={() => openCreateSkill(selectedWorkflowId)}
-            >
-              <Plus size={14} /> Create skill
-            </button>
-          </div>
+          {!skillsUnavailable && (
+            <span className="text-xs font-medium tabular-nums text-[#64748b]">
+              {skills.length} skill{skills.length === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
 
         {!canEditSkills && !skillsUnavailable && !skillsLoading && (

@@ -61,7 +61,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
   // Custom playbook modal form state
   const [formName, setFormName] = useState('Executive Surge Acceleration');
   const [formDescription, setFormDescription] = useState('Immediate executive alignment when an automated evaluation supports stage progression.');
-  const [formAction, setFormAction] = useState('Dispatch VP-level Outbound & Prioritize Meeting Request');
+  const [formAction, setFormAction] = useState('Review account with executive sponsor and prioritize follow-up');
   const [formLane, setFormLane] = useState('SALES_LANE');
   const [formSlaHours, setFormSlaHours] = useState(4);
   const [formNoulQuestion, setFormNoulQuestion] = useState('progress');
@@ -185,7 +185,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       });
       setIsModalOpen(false);
       loadCustomPlaybooks();
-      setResult(`Playbook "${formName}" saved. It evaluates stored decisions and plans eligible accounts (${formNoulOperator} ${formNoulThreshold.toFixed(2)}); verified destination activation uses the separately approved Marketo skill and dedicated list mapping.`);
+      setResult(`Playbook "${formName}" saved. User-created playbooks preview eligible accounts from stored decisions (${formNoulOperator} ${formNoulThreshold.toFixed(2)}) and do not dispatch campaigns. Marketo delivery is a separate capability for managed playbooks using an approved skill and dedicated list.`);
     } catch (err) {
       setCustomError(err instanceof Error ? err.message : 'Failed to create playbook');
     } finally {
@@ -441,13 +441,12 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
           <div>
             <h2 id="custom-playbooks-heading">Custom playbooks &amp; eligibility rules</h2>
             <p className="dm-muted">
-              A created playbook evaluates stored decisions and plans eligible accounts. Verified
-              destination activation uses the separately approved Marketo skill and dedicated list
-              mapping.
+              User-created playbooks preview eligible accounts from stored decisions and do not
+              dispatch campaigns or write to external providers.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <span className="dm-badge">Plan &amp; preview only · no provider writes</span>
+            <span className="dm-badge">Preview only · no campaign dispatch</span>
             <button
               type="button"
               className="dm-button dm-button-primary"
@@ -458,11 +457,11 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
             </button>
           </div>
         </div>
-        <p className="dm-muted">Action notes describe the intended workflow. Custom playbooks evaluate stored decisions and plan eligible accounts; verified destination activation requires the separately approved Marketo skill and dedicated static list mapping below.</p>
+        <p className="dm-muted">Action notes record the intended follow-up only. Marketo delivery is a separate capability for managed playbooks using an approved skill and dedicated static list mapping below.</p>
         {customLoadError && <p role="alert" className="dm-notice dm-notice-warning">{customLoadError} <button className="dm-button dm-button-secondary" onClick={loadCustomPlaybooks}>Retry playbooks</button></p>}
         {!customLoadError && !customPlaybooks.length && (
           <div className="dm-empty flex flex-wrap items-center justify-between gap-3">
-            <span>No custom playbooks saved yet. Create a playbook to evaluate stored decisions and inspect which accounts qualify.</span>
+            <span>No user-created playbooks saved yet. Create a playbook to preview eligible accounts from stored decisions.</span>
             {canEdit && (
               <button type="button" className="dm-button dm-button-secondary" onClick={() => setIsModalOpen(true)}>
                 <Plus size={14} /> Create playbook
@@ -680,13 +679,13 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
 
     {isModalOpen && <dialog ref={dialogRef} className="dm-playbook-dialog" aria-labelledby="dm-rule-title" onCancel={() => setIsModalOpen(false)}>
       <div className="dm-section-heading"><div><h2 id="dm-rule-title">Create playbook</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close create playbook" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>
-      <p className="dm-muted">This playbook evaluates stored decisions and plans eligible accounts. Verified destination activation uses the separately approved Marketo skill and dedicated list mapping.</p>
+      <p className="dm-muted">User-created playbooks preview eligible accounts from stored decisions and never dispatch campaigns. Marketo delivery is a separate capability for managed playbooks using an approved skill and dedicated list.</p>
       <form onSubmit={handleCreateCustom} className="dm-rule-form">
         {customError && <p role="alert" className="dm-notice dm-notice-warning">{customError}</p>}
         <label>Playbook name<input required autoFocus maxLength={200} value={formName} onChange={(e) => setFormName(e.target.value)}/></label>
         <label>Purpose<textarea rows={2} value={formDescription} onChange={(e) => setFormDescription(e.target.value)}/></label>
         <div className="dm-rule-columns"><label>Operating lane<select value={formLane} onChange={(e) => setFormLane(e.target.value)}><option value="SALES_LANE">Sales follow-up</option><option value="MARKETING_LANE">Marketing nurture</option><option value="HOLD">Hold</option></select></label><label>Response target<select value={formSlaHours} onChange={(e) => setFormSlaHours(Number(e.target.value))}>{[4,12,24,48].map((hours) => <option key={hours} value={hours}>{hours} hours</option>)}</select></label></div>
-        <label>Action note<input required value={formAction} onChange={(e) => setFormAction(e.target.value)}/><small>Describes the planned workflow; verified destination activation uses the separately approved Marketo skill and dedicated list mapping.</small></label>
+        <label>Action note<input required value={formAction} onChange={(e) => setFormAction(e.target.value)}/><small>Records the planned follow-up note only; user-created playbooks do not dispatch campaigns or write to Marketo.</small></label>
         <fieldset><legend><Layers size={16}/> Entry criteria</legend><p className="dm-muted">Current automated evaluation, matching lane, and coverage above zero are always required. Missing or expired judgments never qualify.</p>
           <div className="dm-rule-columns"><label>Progression estimate<select value={formNoulQuestion} onChange={(e) => setFormNoulQuestion(e.target.value)}><option value="progress">Stage progression probability</option></select></label><label>Condition<select value={formNoulOperator} onChange={(e) => setFormNoulOperator(e.target.value)}><option value=">=">At least</option><option value="<=">At most</option></select></label></div>
           <label>Progress threshold <strong>{Math.round(formNoulThreshold * 100)}%</strong><input type="range" min={0} max={1} step={0.05} value={formNoulThreshold} onChange={(e) => setFormNoulThreshold(Number(e.target.value))}/></label>
