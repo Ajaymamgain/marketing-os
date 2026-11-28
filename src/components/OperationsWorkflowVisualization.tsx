@@ -145,6 +145,14 @@ const SAFE_SCALAR_KEYS: Record<string, string> = {
   code: 'Code',
 };
 
+const ERROR_CATEGORY_LABELS: Record<string, string> = {
+  authorization: 'Authorization error',
+  rate_limit: 'Rate limit reached',
+  transient_provider: 'Transient provider error',
+  mapping_or_provider_validation: 'Mapping or provider validation error',
+  unknown: 'Unclassified error',
+};
+
 function sanitizeSafeText(raw: string, maxLen = 220): string {
   let cleaned = raw
     // Redact email addresses
@@ -170,59 +178,82 @@ function sanitizeSafeText(raw: string, maxLen = 220): string {
   return cleaned;
 }
 
+function fixedReceiptStatusSentence(status?: string | null): string {
+  const normalized = (status || '').trim().toLowerCase();
+  if (normalized === 'succeeded' || normalized === 'completed') {
+    return 'Tool check completed and recorded.';
+  }
+  if (normalized === 'failed') {
+    return 'Tool check stopped with an error.';
+  }
+  if (normalized === 'running' || normalized === 'in_progress') {
+    return 'Tool check is currently in progress.';
+  }
+  if (normalized === 'queued' || normalized === 'pending') {
+    return 'Tool check is queued for execution.';
+  }
+  if (normalized === 'cancelled' || normalized === 'canceled') {
+    return 'Tool check was cancelled.';
+  }
+  if (normalized === 'paused' || normalized === 'blocked') {
+    return 'Tool check is paused or blocked.';
+  }
+  if (normalized === 'awaiting_review') {
+    return 'Tool check recorded and awaiting review.';
+  }
+  return 'Tool receipt recorded.';
+}
+
 function summarizeSafeStepResult(step: OperationStepReceipt): string {
+  const normalizedStatus = (step.status || '').trim().toLowerCase();
+  const statusSentence = fixedReceiptStatusSentence(normalizedStatus);
   const result = step.result;
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return step.status.toLowerCase() === 'failed'
-      ? 'Tool step failed. No safe summary message was recorded.'
-      : 'Tool receipt recorded with no text summary.';
+    return normalizedStatus === 'failed'
+      ? `${statusSentence} Inspect Case Inbox for approved summary details.`
+      : `${statusSentence} Structured payload details are withheld from this visualization.`;
   }
 
-  const parts: string[] = [];
+  const detailItems: string[] = [];
 
-  // 1. Check safe explicit prose fields first
-  const textCandidates = ['summary', 'message', 'reason', 'note', 'outcome', 'error'] as const;
-  for (const field of textCandidates) {
-    const val = result[field];
-    if (typeof val === 'string' && val.trim()) {
-      const safe = sanitizeSafeText(val, 220);
-      if (safe) {
-        parts.push(safe);
-        break;
-      }
+  // 1. Map known backend error_category values to fixed product-owned labels only
+  const rawCategory = result.error_category;
+  if (typeof rawCategory === 'string') {
+    const normalizedCategory = rawCategory.trim().toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(ERROR_CATEGORY_LABELS, normalizedCategory)) {
+      detailItems.push(`Error category: ${ERROR_CATEGORY_LABELS[normalizedCategory]}`);
     }
   }
 
-  // 2. Append strictly whitelisted scalar operational counters (never contacts, credentials, or raw payloads)
+  // 2. Append strictly allowlisted finite numeric and boolean values (never arbitrary strings or string counters)
   const metricParts: string[] = [];
   for (const [key, value] of Object.entries(result)) {
     if (SENSITIVE_KEY_PATTERN.test(key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(SAFE_SCALAR_KEYS, key)) continue;
     const label = SAFE_SCALAR_KEYS[key];
-    if (!label) continue;
     if (typeof value === 'number' && Number.isFinite(value)) {
       metricParts.push(`${label}: ${value.toLocaleString()}`);
     } else if (typeof value === 'boolean') {
       metricParts.push(`${label}: ${value ? 'Yes' : 'No'}`);
-    } else if (typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 32) {
-      const safe = sanitizeSafeText(value, 32);
-      if (safe) metricParts.push(`${label}: ${safe}`);
     }
     if (metricParts.length >= 3) break;
   }
 
   if (metricParts.length > 0) {
-    parts.push(metricParts.join(' · '));
+    detailItems.push(metricParts.join(' · '));
   }
 
-  if (parts.length > 0) return parts.join(' — ');
+  if (detailItems.length > 0) {
+    return `${statusSentence} ${detailItems.join(' · ')}.`;
+  }
 
-  if (step.status.toLowerCase() === 'failed') {
-    return 'Tool check stopped with an error. Inspect Case Inbox for approved summary details.';
+  if (normalizedStatus === 'failed') {
+    return `${statusSentence} Inspect Case Inbox for approved summary details.`;
   }
-  if (['running', 'queued'].includes(step.status.toLowerCase())) {
-    return 'Tool receipt is currently in progress.';
+  if (['running', 'queued', 'in_progress', 'pending'].includes(normalizedStatus)) {
+    return statusSentence;
   }
-  return 'Tool receipt recorded. Structured payload details are withheld from this visualization.';
+  return `${statusSentence} Structured payload details are withheld from this visualization.`;
 }
 
 function truncateText(text: string, maxLen: number): string {
@@ -305,8 +336,13 @@ export const OperationsWorkflowVisualization: React.FC<OperationsWorkflowVisuali
   }, [workflow.id, selectedCaseId, mode]);
 
   // Fetch recorded run detail via authenticated GET /v1/operations/jobs/{id} with stale-response guard
+  // and gated, non-overlapping recursive polling scheduled strictly after each request settles.
   useEffect(() => {
-    if (!isActive || mode !== 'recorded') return;
+    if (!isActive || mode !== 'recorded') {
+      requestSeqRef.current += 1;
+      setLoadingDetail(false);
+      return;
+    }
     if (!selectedCaseId) {
       requestSeqRef.current += 1;
       setJobDetail(null);
@@ -316,34 +352,83 @@ export const OperationsWorkflowVisualization: React.FC<OperationsWorkflowVisuali
     }
 
     let active = true;
-    const reqId = ++requestSeqRef.current;
+    let pollTimeoutId: number | null = null;
+    let lastKnownStatus: string | null | undefined = null;
 
-    setLoadingDetail(true);
-    setDetailError('');
-    setJobDetail((prev) => (prev?.job.id === selectedCaseId ? prev : null));
+    const clearPollTimer = () => {
+      if (pollTimeoutId !== null) {
+        window.clearTimeout(pollTimeoutId);
+        pollTimeoutId = null;
+      }
+    };
 
-    fetchJobDetailRef
-      .current(selectedCaseId)
-      .then((payload) => {
+    const scheduleNextPoll = () => {
+      clearPollTimer();
+      if (!active || !isActivePollableStatus(lastKnownStatus)) return;
+      pollTimeoutId = window.setTimeout(() => {
+        pollTimeoutId = null;
+        if (!active) return;
+        void runPoll();
+      }, POLL_INTERVAL_MS);
+    };
+
+    const runPoll = async () => {
+      const reqId = ++requestSeqRef.current;
+      try {
+        const payload = await fetchJobDetailRef.current(selectedCaseId);
         if (!active || reqId !== requestSeqRef.current) return;
         setJobDetail(payload);
         setDetailError('');
-      })
-      .catch((cause) => {
+        lastKnownStatus = payload.job?.status;
+        if (isActivePollableStatus(payload.job?.status)) {
+          scheduleNextPoll();
+        } else {
+          clearPollTimer();
+        }
+      } catch {
+        if (!active || reqId !== requestSeqRef.current) return;
+        // Preserve last valid receipt snapshot on transient poll errors
+        if (isActivePollableStatus(lastKnownStatus)) {
+          scheduleNextPoll();
+        }
+      }
+    };
+
+    const runInitialFetch = async () => {
+      const reqId = ++requestSeqRef.current;
+      setLoadingDetail(true);
+      setDetailError('');
+      setJobDetail((prev) => (prev?.job.id === selectedCaseId ? prev : null));
+
+      try {
+        const payload = await fetchJobDetailRef.current(selectedCaseId);
+        if (!active || reqId !== requestSeqRef.current) return;
+        setJobDetail(payload);
+        setDetailError('');
+        setLoadingDetail(false);
+        lastKnownStatus = payload.job?.status;
+        if (isActivePollableStatus(payload.job?.status)) {
+          scheduleNextPoll();
+        } else {
+          clearPollTimer();
+        }
+      } catch (cause) {
         if (!active || reqId !== requestSeqRef.current) return;
         setJobDetail(null);
         setDetailError(
           cause instanceof Error ? cause.message : 'Recorded run receipts could not load.'
         );
-      })
-      .finally(() => {
-        if (active && reqId === requestSeqRef.current) {
-          setLoadingDetail(false);
-        }
-      });
+        setLoadingDetail(false);
+        clearPollTimer();
+      }
+    };
+
+    void runInitialFetch();
 
     return () => {
       active = false;
+      clearPollTimer();
+      requestSeqRef.current += 1;
     };
   }, [isActive, mode, selectedCaseId, retryTick]);
 
@@ -359,32 +444,10 @@ export const OperationsWorkflowVisualization: React.FC<OperationsWorkflowVisuali
     isActive &&
     mode === 'recorded' &&
     Boolean(selectedCaseId) &&
-    isActivePollableStatus(activeJob?.status);
-
-  // Poll active running/queued case for new receipts every 4s; stop for terminal state or unmount
-  useEffect(() => {
-    if (!shouldPoll || !selectedCaseId) return;
-    let active = true;
-
-    const timer = window.setInterval(() => {
-      const reqId = ++requestSeqRef.current;
-      fetchJobDetailRef
-        .current(selectedCaseId)
-        .then((payload) => {
-          if (!active || reqId !== requestSeqRef.current) return;
-          setJobDetail(payload);
-          setDetailError('');
-        })
-        .catch(() => {
-          // Keep last valid receipt snapshot on transient poll errors
-        });
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [shouldPoll, selectedCaseId]);
+    !loadingDetail &&
+    !detailError &&
+    jobDetail?.job.id === selectedCaseId &&
+    isActivePollableStatus(jobDetail.job.status);
 
   const orderedReceipts = useMemo(() => {
     if (!jobDetail || jobDetail.job.id !== selectedCaseId) return [];
