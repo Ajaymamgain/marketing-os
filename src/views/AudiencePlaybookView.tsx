@@ -185,7 +185,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       });
       setIsModalOpen(false);
       loadCustomPlaybooks();
-      setResult(`Playbook "${formName}" saved as an eligibility rule. Recorded progression estimate ${formNoulOperator} ${formNoulThreshold.toFixed(2)}.`);
+      setResult(`Playbook "${formName}" saved. It evaluates stored decisions and plans eligible accounts (${formNoulOperator} ${formNoulThreshold.toFixed(2)}); verified destination activation uses the separately approved Marketo skill and dedicated list mapping.`);
     } catch (err) {
       setCustomError(err instanceof Error ? err.message : 'Failed to create playbook');
     } finally {
@@ -292,7 +292,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
       <div><h1>Playbooks</h1><p>Review the next action, connect its destination, and track what the provider confirms.</p></div>
       <div className="dm-playbook-actions">
         <button className="dm-button dm-button-primary" disabled={!canEdit} onClick={() => setIsModalOpen(true)}>
-          <Plus size={16}/> Create eligibility rule
+          <Plus size={16}/> Create playbook
         </button>
         <button type="button" className="dm-button dm-button-secondary" disabled={!plan}
           onClick={() => document.getElementById('dm-automation-setup')?.scrollIntoView({block:'start'})}>Map a destination</button>
@@ -302,7 +302,7 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
           onClick={() => document.getElementById('playbook-runs')?.scrollIntoView({block:'start'})}>Run history <ArrowRight size={16}/></button>
       </div>
     </div>
-    {!canEdit && <div className="dm-notice" role="status"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#64748b]"/><p>Workspace owner permission is required to create eligibility rules, approve Marketo skills and tools, save destination mappings, enable automatic delivery, or apply updates.</p></div>}
+    {!canEdit && <div className="dm-notice" role="status"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#64748b]"/><p>Workspace owner permission is required to create playbooks, approve Marketo skills and tools, save destination mappings, enable automatic delivery, or apply updates.</p></div>}
     <div className="dm-status-strip">
       <span className={plan?.mode === 'local' && plan.can_apply ? 'text-[#15803d]' : 'text-[#b45309]'}>{delivery}</span>
       <span>{activationCapabilityLabel} · Refreshes every 15 seconds{checkedAt ? ` · Checked ${checkedAt}` : ''}</span>
@@ -436,17 +436,40 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
         </div>
       </section>
 
-      <section className="dm-panel">
+      <section className="dm-panel" id="custom-playbooks" aria-labelledby="custom-playbooks-heading">
         <div className="dm-section-heading">
           <div>
-            <h2>Custom eligibility rules</h2>
-            <p className="dm-muted">Match demand units using a current progression evaluation, lane, fit, intent, and verified coverage.</p>
+            <h2 id="custom-playbooks-heading">Custom playbooks &amp; eligibility rules</h2>
+            <p className="dm-muted">
+              A created playbook evaluates stored decisions and plans eligible accounts. Verified
+              destination activation uses the separately approved Marketo skill and dedicated list
+              mapping.
+            </p>
           </div>
-          <span className="dm-badge">Plan &amp; preview only · no provider writes</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="dm-badge">Plan &amp; preview only · no provider writes</span>
+            <button
+              type="button"
+              className="dm-button dm-button-primary"
+              disabled={!canEdit}
+              onClick={() => setIsModalOpen(true)}
+            >
+              <Plus size={15} /> Create playbook
+            </button>
+          </div>
         </div>
-        <p className="dm-muted">Action notes describe the intended workflow. Custom rules only plan and preview qualification; they never execute provider writes.</p>
-        {customLoadError && <p role="alert" className="dm-notice dm-notice-warning">{customLoadError} <button className="dm-button dm-button-secondary" onClick={loadCustomPlaybooks}>Retry rules</button></p>}
-        {!customLoadError && !customPlaybooks.length && <p className="dm-empty">No custom rules saved. Create a rule to inspect which demand units qualify.</p>}
+        <p className="dm-muted">Action notes describe the intended workflow. Custom playbooks evaluate stored decisions and plan eligible accounts; verified destination activation requires the separately approved Marketo skill and dedicated static list mapping below.</p>
+        {customLoadError && <p role="alert" className="dm-notice dm-notice-warning">{customLoadError} <button className="dm-button dm-button-secondary" onClick={loadCustomPlaybooks}>Retry playbooks</button></p>}
+        {!customLoadError && !customPlaybooks.length && (
+          <div className="dm-empty flex flex-wrap items-center justify-between gap-3">
+            <span>No custom playbooks saved yet. Create a playbook to evaluate stored decisions and inspect which accounts qualify.</span>
+            {canEdit && (
+              <button type="button" className="dm-button dm-button-secondary" onClick={() => setIsModalOpen(true)}>
+                <Plus size={14} /> Create playbook
+              </button>
+            )}
+          </div>
+        )}
         <div className="dm-recipe-grid">{customPlaybooks.map((cpb) => <article key={cpb.id} className="dm-recipe dm-custom-rule">
           <div className="dm-section-heading"><span className="dm-badge">{cpb.is_active ? 'Enabled rule' : 'Paused rule'}</span><span className="dm-badge">Plan &amp; preview · {friendly(cpb.lane)}</span></div>
           <h3>{cpb.name}</h3><p>{cpb.description}</p>
@@ -656,21 +679,21 @@ export const AudiencePlaybookView: React.FC<Props> = ({ accounts, loading = fals
     {!selectedKey && <div className="dm-panel dm-empty">Select a demand unit to inspect its evidence and Marketo static-list activation.</div>}
 
     {isModalOpen && <dialog ref={dialogRef} className="dm-playbook-dialog" aria-labelledby="dm-rule-title" onCancel={() => setIsModalOpen(false)}>
-      <div className="dm-section-heading"><div><h2 id="dm-rule-title">Create an eligibility rule</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close eligibility rule" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>
-      <p className="dm-muted">Use recorded decision evaluations to find qualifying demand units. Saving an action note does not execute it.</p>
+      <div className="dm-section-heading"><div><h2 id="dm-rule-title">Create playbook</h2></div><button type="button" className="dm-button dm-button-secondary" aria-label="Close create playbook" onClick={() => setIsModalOpen(false)}><X size={18}/></button></div>
+      <p className="dm-muted">This playbook evaluates stored decisions and plans eligible accounts. Verified destination activation uses the separately approved Marketo skill and dedicated list mapping.</p>
       <form onSubmit={handleCreateCustom} className="dm-rule-form">
         {customError && <p role="alert" className="dm-notice dm-notice-warning">{customError}</p>}
-        <label>Rule name<input required autoFocus maxLength={200} value={formName} onChange={(e) => setFormName(e.target.value)}/></label>
+        <label>Playbook name<input required autoFocus maxLength={200} value={formName} onChange={(e) => setFormName(e.target.value)}/></label>
         <label>Purpose<textarea rows={2} value={formDescription} onChange={(e) => setFormDescription(e.target.value)}/></label>
         <div className="dm-rule-columns"><label>Operating lane<select value={formLane} onChange={(e) => setFormLane(e.target.value)}><option value="SALES_LANE">Sales follow-up</option><option value="MARKETING_LANE">Marketing nurture</option><option value="HOLD">Hold</option></select></label><label>Response target<select value={formSlaHours} onChange={(e) => setFormSlaHours(Number(e.target.value))}>{[4,12,24,48].map((hours) => <option key={hours} value={hours}>{hours} hours</option>)}</select></label></div>
-        <label>Action note<input required value={formAction} onChange={(e) => setFormAction(e.target.value)}/><small>Describes the intended action; no campaign is dispatched by this rule.</small></label>
+        <label>Action note<input required value={formAction} onChange={(e) => setFormAction(e.target.value)}/><small>Describes the planned workflow; verified destination activation uses the separately approved Marketo skill and dedicated list mapping.</small></label>
         <fieldset><legend><Layers size={16}/> Entry criteria</legend><p className="dm-muted">Current automated evaluation, matching lane, and coverage above zero are always required. Missing or expired judgments never qualify.</p>
           <div className="dm-rule-columns"><label>Progression estimate<select value={formNoulQuestion} onChange={(e) => setFormNoulQuestion(e.target.value)}><option value="progress">Stage progression probability</option></select></label><label>Condition<select value={formNoulOperator} onChange={(e) => setFormNoulOperator(e.target.value)}><option value=">=">At least</option><option value="<=">At most</option></select></label></div>
           <label>Progress threshold <strong>{Math.round(formNoulThreshold * 100)}%</strong><input type="range" min={0} max={1} step={0.05} value={formNoulThreshold} onChange={(e) => setFormNoulThreshold(Number(e.target.value))}/></label>
           <div className="dm-rule-columns"><label>Minimum fit <strong>{formMinFit} / 100</strong><input type="range" min={0} max={100} step={5} value={formMinFit} onChange={(e) => setFormMinFit(Number(e.target.value))}/></label><label>Minimum intent <strong>{formMinIntent} / 100</strong><input type="range" min={0} max={100} step={5} value={formMinIntent} onChange={(e) => setFormMinIntent(Number(e.target.value))}/></label></div>
         </fieldset>
-        <div className="dm-match-preview" aria-live="polite"><h3>{matching ? 'Checking stored decisions…' : matchError ? 'Preview unavailable' : `${previewMatches.length} qualifying demand units`}</h3>{matchError ? <p role="alert">{matchError}</p> : <div className="dm-match-list">{previewMatches.map((m) => <div key={m.demand_unit_key}><strong>{m.account_domain}</strong><span>{friendly(m.need_key)} · {Math.round(m.noul_score * 100)}% progress</span></div>)}{!matching && !previewMatches.length && <p>No current decisions meet all criteria. This preview uses the same server-side checks as saved rules.</p>}</div>}</div>
-        <div className="dm-playbook-actions dm-dialog-footer"><button type="button" className="dm-button dm-button-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button><button type="submit" className="dm-button dm-button-primary" disabled={!canEdit || isSavingCustom}>{isSavingCustom ? 'Saving…' : 'Save eligibility rule'}</button></div>
+        <div className="dm-match-preview" aria-live="polite"><h3>{matching ? 'Checking stored decisions…' : matchError ? 'Preview unavailable' : `${previewMatches.length} qualifying demand units`}</h3>{matchError ? <p role="alert">{matchError}</p> : <div className="dm-match-list">{previewMatches.map((m) => <div key={m.demand_unit_key}><strong>{m.account_domain}</strong><span>{friendly(m.need_key)} · {Math.round(m.noul_score * 100)}% progress</span></div>)}{!matching && !previewMatches.length && <p>No current decisions meet all criteria. This preview uses the same server-side checks as saved playbooks.</p>}</div>}</div>
+        <div className="dm-playbook-actions dm-dialog-footer"><button type="button" className="dm-button dm-button-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button><button type="submit" className="dm-button dm-button-primary" disabled={!canEdit || isSavingCustom}>{isSavingCustom ? 'Saving…' : 'Save playbook'}</button></div>
       </form>
     </dialog>}
 

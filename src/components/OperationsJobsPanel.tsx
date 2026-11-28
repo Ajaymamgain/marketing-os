@@ -17,6 +17,13 @@ import {
 } from 'lucide-react';
 import { ActiveNavTab } from '../types';
 import { OperationsInstructions, type InstructionProfile } from './OperationsInstructions';
+import {
+  OperationsAgentBoard,
+  extractRecordedSubagents,
+  type RecordedSubagent,
+  type WorkflowSkillScope,
+  type WorkspaceSkill,
+} from './OperationsAgentBoard';
 
 type Fact = {
   field: string;
@@ -32,6 +39,7 @@ type Report = {
   proposal: string;
   outcome: string;
   evidence_sequences: number[];
+  subagents?: RecordedSubagent[];
 };
 
 type Job = {
@@ -43,10 +51,14 @@ type Job = {
   updated_at: string;
   completed_at?: string | null;
   last_error?: string;
+  skill_id?: string | null;
+  skill_name?: string | null;
+  skill_revision?: number | null;
   result?: {
     report?: Report;
     usage?: { model_calls?: number; total_tokens?: number };
     provider_receipt?: { status?: string; confirmed_at?: string | null; summary?: string } | null;
+    subagents?: RecordedSubagent[];
   };
 };
 
@@ -72,13 +84,14 @@ type OperationsState = {
   state: string;
   workflows: string[];
   automatic_workflows: string[];
+  workflow_skills?: Record<string, WorkflowSkillScope>;
   targets: Record<string, Array<{ id: string; label: string }>>;
   jobs: Job[];
   policy: { enabled: boolean; workflows: string[]; revision: number };
 };
 
-type DeskTab = 'inbox' | 'workflows' | 'triggers' | 'instructions';
-type StatusFilter = 'all' | 'draft' | 'review' | 'attention' | 'active' | 'succeeded';
+type DeskTab = 'inbox' | 'board' | 'triggers' | 'instructions';
+type StatusFilter = 'all' | 'draft' | 'active' | 'paused' | 'completed' | 'review' | 'failed';
 
 const WORKFLOW_NAMES: Record<string, string> = {
   'connector-review': 'MCP connection review',
@@ -151,7 +164,7 @@ async function read<T>(path: string): Promise<T> {
   return response.json();
 }
 
-async function mutate(path: string, body: unknown) {
+async function mutate<T = Record<string, unknown>>(path: string, body: unknown): Promise<T> {
   const session = await read<{ csrf_token: string }>('/v1/auth/me');
   const response = await fetch(path, {
     method: 'POST',
@@ -159,9 +172,20 @@ async function mutate(path: string, body: unknown) {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf_token },
     body: JSON.stringify(body),
   });
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'Operations Desk request was rejected.');
-  return value;
+  let value: Record<string, unknown> = {};
+  try {
+    value = await response.json();
+  } catch {
+    value = {};
+  }
+  if (!response.ok) {
+    const message =
+      typeof value.error === 'string' && value.error
+        ? value.error
+        : 'Operations Desk request was rejected.';
+    throw new Error(message);
+  }
+  return value as T;
 }
 
 function formatStamp(value?: string | null): string {
@@ -180,8 +204,9 @@ function formatStatusLabel(status?: string | null): string {
   if (!status) return 'Unknown';
   const normalized = status.toLowerCase();
   if (normalized === 'draft') return 'Draft';
+  if (normalized === 'paused') return 'Paused';
   if (normalized === 'awaiting_review') return 'Awaiting review';
-  if (normalized === 'succeeded' || normalized === 'completed') return 'Checks finished';
+  if (normalized === 'succeeded' || normalized === 'completed') return 'Completed';
   if (normalized === 'failed') return 'Failed';
   if (normalized === 'blocked') return 'Held / blocked';
   if (normalized === 'cancelled' || normalized === 'canceled') return 'Cancelled';
@@ -193,7 +218,8 @@ function formatStatusLabel(status?: string | null): string {
 function statusTextTone(status?: string | null): string {
   const normalized = (status || '').toLowerCase();
   if (normalized === 'failed') return 'text-[#b91c1c]';
-  if (normalized === 'blocked' || normalized === 'awaiting_review') return 'text-[#b45309]';
+  if (normalized === 'paused' || normalized === 'blocked' || normalized === 'awaiting_review')
+    return 'text-[#b45309]';
   if (normalized === 'succeeded' || normalized === 'completed') return 'text-[#15803d]';
   if (normalized === 'running' || normalized === 'queued') return 'text-[#1d4ed8]';
   return 'text-[#475569]';
@@ -228,11 +254,19 @@ export function OperationsJobsPanel({
   const [unavailable, setUnavailable] = useState(false);
   const [owner, setOwner] = useState(false);
   const [workflow, setWorkflow] = useState('sync-investigation');
+  const [selectedSkillId, setSelectedSkillId] = useState('');
   const [target, setTarget] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  const [skills, setSkills] = useState<WorkspaceSkill[]>([]);
+  const [skillsCanEdit, setSkillsCanEdit] = useState(false);
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [skillsLoading, setSkillsLoading] = useState(true);
+  const [skillsUnavailable, setSkillsUnavailable] = useState(false);
+  const [skillsError, setSkillsError] = useState('');
 
   const [tab, setTab] = useState<DeskTab>('inbox');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -250,6 +284,8 @@ export function OperationsJobsPanel({
 
   const inspectorRef = useRef<HTMLDivElement | null>(null);
   const newCaseRef = useRef<HTMLElement | null>(null);
+  const workflowSelectRef = useRef<HTMLSelectElement | null>(null);
+  const targetSelectRef = useRef<HTMLSelectElement | null>(null);
 
   async function refresh() {
     const next = await read<OperationsState>('/v1/operations/status');
@@ -257,6 +293,36 @@ export function OperationsJobsPanel({
     setUnavailable(false);
     return next;
   }
+
+  const loadSkills = async (showSpinner = true) => {
+    if (showSpinner) setSkillsLoading(true);
+    try {
+      const response = await fetch('/v1/operations/skills', { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? 'Workspace skills endpoint (/v1/operations/skills) is not available on this server.'
+            : 'Workspace skills could not load.'
+        );
+      }
+      const data = (await response.json()) as {
+        skills?: WorkspaceSkill[];
+        can_edit?: boolean;
+      };
+      setSkills(Array.isArray(data?.skills) ? data.skills : []);
+      setSkillsCanEdit(Boolean(data?.can_edit));
+      setSkillsLoaded(true);
+      setSkillsUnavailable(false);
+      setSkillsError('');
+    } catch (cause) {
+      setSkillsUnavailable(true);
+      setSkillsError(
+        cause instanceof Error ? cause.message : 'Workspace skills API is unavailable.'
+      );
+    } finally {
+      if (showSpinner) setSkillsLoading(false);
+    }
+  };
 
   const reloadAll = async () => {
     setLoading(true);
@@ -275,6 +341,7 @@ export function OperationsJobsPanel({
     } finally {
       setLoading(false);
     }
+    void loadSkills(true);
   };
 
   useEffect(() => {
@@ -301,6 +368,7 @@ export function OperationsJobsPanel({
       }
     };
     void load(true);
+    void loadSkills(true);
     const timer = window.setInterval(() => void load(false), 8000);
     return () => {
       active = false;
@@ -382,8 +450,26 @@ export function OperationsJobsPanel({
   const needsResearch = ['company-enrichment', 'people-enrichment'].includes(workflow);
   const activeSkill = SKILLS.find((item) => item.id === workflow) || SKILLS[0];
 
+  const matchingPublishedSkills = useMemo(
+    () => skills.filter((item) => item.status === 'published' && item.workflow === workflow),
+    [skills, workflow]
+  );
+  const validSelectedSkillId = matchingPublishedSkills.some((item) => item.id === selectedSkillId)
+    ? selectedSkillId
+    : '';
+  const canEditSkills = skillsLoaded ? skillsCanEdit : owner;
+
   const draftCount = useMemo(() => jobs.filter((j) => j.status === 'draft').length, [jobs]);
   const reviewCount = useMemo(() => jobs.filter((j) => hasPendingProposal(j)).length, [jobs]);
+  const failedCount = useMemo(() => jobs.filter((j) => j.status === 'failed').length, [jobs]);
+  const pausedCaseCount = useMemo(
+    () => jobs.filter((j) => ['paused', 'blocked', 'awaiting_review'].includes(j.status)).length,
+    [jobs]
+  );
+  const completedCount = useMemo(
+    () => jobs.filter((j) => ['succeeded', 'completed'].includes(j.status)).length,
+    [jobs]
+  );
   const attentionCount = useMemo(
     () => jobs.filter((j) => ['failed', 'blocked'].includes(j.status)).length,
     [jobs]
@@ -398,11 +484,16 @@ export function OperationsJobsPanel({
     return jobs.filter((job) => {
       if (workflowFilter !== 'all' && job.workflow !== workflowFilter) return false;
       if (statusFilter === 'draft' && job.status !== 'draft') return false;
-      if (statusFilter === 'review' && !hasPendingProposal(job)) return false;
-      if (statusFilter === 'attention' && !['failed', 'blocked'].includes(job.status)) return false;
       if (statusFilter === 'active' && !['queued', 'running'].includes(job.status)) return false;
-      if (statusFilter === 'succeeded' && !['succeeded', 'completed'].includes(job.status))
+      if (
+        statusFilter === 'paused' &&
+        !['paused', 'blocked', 'awaiting_review'].includes(job.status)
+      )
         return false;
+      if (statusFilter === 'completed' && !['succeeded', 'completed'].includes(job.status))
+        return false;
+      if (statusFilter === 'review' && !hasPendingProposal(job)) return false;
+      if (statusFilter === 'failed' && job.status !== 'failed') return false;
       if (!q) return true;
       const wfName = WORKFLOW_NAMES[job.workflow] || job.workflow;
       return (
@@ -433,19 +524,94 @@ export function OperationsJobsPanel({
     }
   }
 
+  const upsertSkill = (nextSkill: WorkspaceSkill) => {
+    setSkills((prev) => {
+      const exists = prev.some((item) => item.id === nextSkill.id);
+      if (!exists) return [nextSkill, ...prev];
+      return prev.map((item) => (item.id === nextSkill.id ? nextSkill : item));
+    });
+  };
+
+  const handleSaveSkill = async (payload: {
+    action: 'save';
+    workflow: string;
+    name: string;
+    description: string;
+    instructions: string;
+    id?: string;
+    revision?: number;
+  }): Promise<WorkspaceSkill> => {
+    const res = (await mutate('/v1/operations/skills', payload)) as { skill?: WorkspaceSkill };
+    if (!res?.skill) {
+      throw new Error('Workspace skill save response did not include a skill record.');
+    }
+    upsertSkill(res.skill);
+    void loadSkills(false);
+    return res.skill;
+  };
+
+  const handlePublishSkill = async (payload: {
+    action: 'publish';
+    id: string;
+    revision: number;
+  }): Promise<WorkspaceSkill> => {
+    const res = (await mutate('/v1/operations/skills', payload)) as { skill?: WorkspaceSkill };
+    if (!res?.skill) {
+      throw new Error('Workspace skill publish response did not include a skill record.');
+    }
+    upsertSkill(res.skill);
+    void loadSkills(false);
+    return res.skill;
+  };
+
+  const handleSelectWorkflowForNewCase = (workflowId: string, skillId?: string) => {
+    setWorkflow(workflowId);
+    setSelectedSkillId(skillId || '');
+    setTarget('');
+    setTargetSearch('');
+    newCaseRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.setTimeout(() => {
+      if (targetSelectRef.current && !targetSelectRef.current.disabled) {
+        targetSelectRef.current.focus();
+      } else {
+        workflowSelectRef.current?.focus();
+      }
+    }, 80);
+  };
+
+  const handleInspectJobInInbox = (jobId: string) => {
+    setSelectedJobId(jobId);
+    setStatusFilter('all');
+    setWorkflowFilter('all');
+    setRunSearch('');
+    setTab('inbox');
+    window.setTimeout(() => {
+      inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  };
+
+  const handleFilterInboxByWorkflow = (workflowId: string) => {
+    setWorkflowFilter(workflowId);
+    setStatusFilter('all');
+    setRunSearch('');
+    setTab('inbox');
+  };
+
   const handleRunWorkflow = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!ready || !owner || busy || !visibleTarget || (needsResearch && !state?.research_configured))
       return;
-    const created = await act(
-      () =>
-        mutate('/v1/operations/jobs', {
-          workflow,
-          target: visibleTarget,
-          request_key: crypto.randomUUID(),
-        }),
+    const payload: Record<string, unknown> = {
+      workflow,
+      target: visibleTarget,
+      request_key: crypto.randomUUID(),
+    };
+    if (validSelectedSkillId) payload.skill_id = validSelectedSkillId;
+
+    const created = (await act(
+      () => mutate('/v1/operations/jobs', payload),
       `Started case: ${WORKFLOW_NAMES[workflow] || workflow} for ${visibleTarget}.`
-    );
+    )) as { job?: { id?: string }; id?: string } | undefined;
     const createdId = created?.job?.id || created?.id;
     if (createdId) setSelectedJobId(createdId);
     if (created) {
@@ -457,16 +623,18 @@ export function OperationsJobsPanel({
 
   const handleSaveDraft = async () => {
     if (!owner || busy || !visibleTarget) return;
-    const created = await act(
-      () =>
-        mutate('/v1/operations/jobs', {
-          workflow,
-          target: visibleTarget,
-          request_key: crypto.randomUUID(),
-          draft: true,
-        }),
+    const payload: Record<string, unknown> = {
+      workflow,
+      target: visibleTarget,
+      request_key: crypto.randomUUID(),
+      draft: true,
+    };
+    if (validSelectedSkillId) payload.skill_id = validSelectedSkillId;
+
+    const created = (await act(
+      () => mutate('/v1/operations/jobs', payload),
       `Saved draft case: ${WORKFLOW_NAMES[workflow] || workflow} for ${visibleTarget} (no model calls).`
-    );
+    )) as { job?: { id?: string }; id?: string } | undefined;
     const createdId = created?.job?.id || created?.id;
     if (createdId) setSelectedJobId(createdId);
     if (created) {
@@ -479,14 +647,14 @@ export function OperationsJobsPanel({
   const handleStartDraftCase = async (job: Job) => {
     const draftNeedsResearch = ['company-enrichment', 'people-enrichment'].includes(job.workflow);
     if (!ready || !owner || busy || (draftNeedsResearch && !state?.research_configured)) return;
-    const started = await act(
+    const started = (await act(
       () =>
         mutate('/v1/operations/jobs', {
           action: 'start',
           case_id: job.id,
         }),
       `Started case: ${WORKFLOW_NAMES[job.workflow] || job.workflow} for ${job.target}.`
-    );
+    )) as { job?: { id?: string }; id?: string } | undefined;
     if (started) {
       const nextId = started?.job?.id || started?.id || job.id;
       setSelectedJobId(nextId);
@@ -524,7 +692,7 @@ export function OperationsJobsPanel({
 
   const tabs: Array<{ id: DeskTab; label: string; count?: number }> = [
     { id: 'inbox', label: 'Case Inbox', count: jobs.length },
-    { id: 'workflows', label: 'Workflows', count: SKILLS.length },
+    { id: 'board', label: 'Agent Board', count: SKILLS.length },
     { id: 'triggers', label: 'Automatic triggers' },
     { id: 'instructions', label: 'Instructions' },
   ];
@@ -608,6 +776,10 @@ export function OperationsJobsPanel({
   const inspectedHasProposal = hasPendingProposal(inspectedJob);
   const inspectedUsage = inspectedJob?.result?.usage;
   const inspectedReceipt = inspectedJob?.result?.provider_receipt;
+  const inspectedSubagents = useMemo(
+    () => extractRecordedSubagents(inspectedJob),
+    [inspectedJob]
+  );
 
   const hasTechnicalDetails = Boolean(
     inspectedJob &&
@@ -640,56 +812,58 @@ export function OperationsJobsPanel({
 
   return (
     <div className="space-y-5" aria-label="Operations Desk workbench">
-      {/* Compact 4-Cell Flat Ledger Summary Strip */}
+      {/* Compact 12-Column Flat Ledger Strip (answers what can run and what needs attention) */}
       <section
-        className="grid grid-cols-2 divide-y divide-[#e2e8f0] rounded-[10px] border border-[#e2e8f0] bg-white sm:grid-cols-4 sm:divide-x sm:divide-y-0"
-        aria-label="Operations Desk summary"
+        className="grid grid-cols-1 divide-y divide-[#e2e8f0] rounded-[10px] border border-[#e2e8f0] bg-white sm:grid-cols-12 sm:divide-x sm:divide-y-0"
+        aria-label="Operations Desk status"
       >
-        <div className="p-4">
-          <p className="text-xs font-medium text-[#64748b]">Desk status</p>
-          <p className={`mt-1 text-base font-semibold ${deskStatusTone}`}>{deskStatusLabel}</p>
-          <p className="mt-0.5 text-xs text-[#64748b]">
+        <div className="px-4 py-3 sm:col-span-3">
+          <p className="text-[11px] font-medium text-[#64748b]">Desk readiness</p>
+          <p className={`mt-0.5 text-sm font-semibold ${deskStatusTone}`}>{deskStatusLabel}</p>
+          <p className="mt-0.5 text-[11px] text-[#64748b]">
             {unavailable
               ? 'Last snapshot shown'
               : paused
-                ? 'Manual runs also require the decision service enabled'
+                ? 'Decision service off'
                 : state?.policy.enabled
                   ? `${state.policy.workflows.length} automatic triggers on`
                   : 'Manual runs only'}
           </p>
         </div>
 
-        <div className="p-4 tabular-nums">
-          <p className="text-xs font-medium text-[#64748b]">Proposed changes awaiting review</p>
+        <div className="px-4 py-3 tabular-nums sm:col-span-3">
+          <p className="text-[11px] font-medium text-[#64748b]">Awaiting review</p>
           <p
-            className={`mt-1 text-xl font-bold ${
+            className={`mt-0.5 text-sm font-semibold ${
               reviewCount > 0 ? 'text-[#b45309]' : 'text-[#0f172a]'
             }`}
           >
-            {state ? reviewCount.toLocaleString() : '—'}
+            {state ? `${reviewCount.toLocaleString()} proposal${reviewCount === 1 ? '' : 's'}` : '—'}
           </p>
-          <p className="mt-0.5 text-xs text-[#64748b]">Proposals never auto-apply</p>
+          <p className="mt-0.5 text-[11px] text-[#64748b]">Changes never auto-apply</p>
         </div>
 
-        <div className="p-4 tabular-nums">
-          <p className="text-xs font-medium text-[#64748b]">Failed or held cases</p>
+        <div className="px-4 py-3 tabular-nums sm:col-span-3">
+          <p className="text-[11px] font-medium text-[#64748b]">Failed or held</p>
           <p
-            className={`mt-1 text-xl font-bold ${
+            className={`mt-0.5 text-sm font-semibold ${
               attentionCount > 0 ? 'text-[#b91c1c]' : 'text-[#0f172a]'
             }`}
           >
-            {state ? attentionCount.toLocaleString() : '—'}
+            {state
+              ? `${attentionCount.toLocaleString()} case${attentionCount === 1 ? '' : 's'}`
+              : '—'}
           </p>
-          <p className="mt-0.5 text-xs text-[#64748b]">Requires operator inspection</p>
+          <p className="mt-0.5 text-[11px] text-[#64748b]">Requires operator inspection</p>
         </div>
 
-        <div className="p-4 tabular-nums">
-          <p className="text-xs font-medium text-[#64748b]">Recorded cases</p>
-          <p className="mt-1 text-xl font-bold text-[#0f172a]">
-            {state ? jobs.length.toLocaleString() : '—'}
+        <div className="px-4 py-3 tabular-nums sm:col-span-3">
+          <p className="text-[11px] font-medium text-[#64748b]">Recent cases</p>
+          <p className="mt-0.5 text-sm font-semibold text-[#0f172a]">
+            {state ? `${jobs.length.toLocaleString()} recorded` : '—'}
           </p>
-          <p className="mt-0.5 text-xs text-[#64748b]">
-            {activeRunCount > 0 ? `${activeRunCount} currently active` : 'Read-only evidence trail'}
+          <p className="mt-0.5 text-[11px] text-[#64748b]">
+            {activeRunCount > 0 ? `${activeRunCount} currently active` : 'Bounded Case Inbox history'}
           </p>
         </div>
       </section>
@@ -856,8 +1030,9 @@ export function OperationsJobsPanel({
           </div>
           <ol
             className="hidden flex-wrap items-center gap-1.5 text-[11px] text-[#64748b] md:flex"
-            aria-label="Predefined workflow sequence"
+            aria-label="Workflow template sequence"
           >
+            <li className="font-medium text-[#475569]">Template:</li>
             {activeSkill.steps.map((stepLabel, idx) => (
               <li key={stepLabel} className="inline-flex items-center gap-1">
                 <span className="font-semibold tabular-nums text-[#0f172a]">{idx + 1}.</span>
@@ -875,11 +1050,13 @@ export function OperationsJobsPanel({
             <label className="block md:col-span-3">
               <span className="block text-xs font-medium text-[#334155]">Workflow</span>
               <select
+                ref={workflowSelectRef}
                 className="dm-input mt-1.5 w-full"
                 value={workflow}
                 disabled={busy || !state}
                 onChange={(e) => {
                   setWorkflow(e.target.value);
+                  setSelectedSkillId('');
                   setTarget('');
                   setTargetSearch('');
                 }}
@@ -892,22 +1069,40 @@ export function OperationsJobsPanel({
               </select>
             </label>
 
-            {targets.length > 8 && (
-              <label className="block md:col-span-2">
-                <span className="block text-xs font-medium text-[#334155]">Filter targets</span>
-                <input
-                  type="search"
-                  className="dm-input mt-1.5 w-full"
-                  value={targetSearch}
-                  onChange={(e) => setTargetSearch(e.target.value)}
-                  placeholder="Domain or demand…"
-                />
-              </label>
-            )}
+            <label className="block md:col-span-3">
+              <span className="block text-xs font-medium text-[#334155]">
+                Workspace skill <span className="font-normal text-[#64748b]">(optional)</span>
+              </span>
+              <select
+                className="dm-input mt-1.5 w-full"
+                value={validSelectedSkillId}
+                disabled={busy || skillsUnavailable || !matchingPublishedSkills.length}
+                aria-label="Published workspace skill for selected workflow"
+                onChange={(e) => setSelectedSkillId(e.target.value)}
+              >
+                {skillsUnavailable ? (
+                  <option value="">Skills API unavailable</option>
+                ) : (
+                  <>
+                    <option value="">
+                      {matchingPublishedSkills.length
+                        ? 'None (built-in workflow)'
+                        : 'No published skills for workflow'}
+                    </option>
+                    {matchingPublishedSkills.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} (rev {item.revision})
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </label>
 
-            <label className={`block ${targets.length > 8 ? 'md:col-span-3' : 'md:col-span-5'}`}>
+            <label className="block md:col-span-3">
               <span className="block text-xs font-medium text-[#334155]">Workspace target</span>
               <select
+                ref={targetSelectRef}
                 className="dm-input mt-1.5 w-full"
                 value={visibleTarget}
                 onChange={(e) => setTarget(e.target.value)}
@@ -933,7 +1128,7 @@ export function OperationsJobsPanel({
               </select>
             </label>
 
-            <div className="flex flex-wrap items-center gap-2 md:col-span-4 md:justify-end">
+            <div className="flex flex-wrap items-center gap-2 md:col-span-3 md:justify-end">
               <button
                 type="button"
                 className={
@@ -966,6 +1161,21 @@ export function OperationsJobsPanel({
               </button>
             </div>
           </div>
+
+          {targets.length > 8 && (
+            <div className="grid grid-cols-1 md:grid-cols-12">
+              <label className="block md:col-span-3 md:col-start-7">
+                <span className="sr-only">Filter workspace targets</span>
+                <input
+                  type="search"
+                  className="dm-input h-8 w-full text-xs"
+                  value={targetSearch}
+                  onChange={(e) => setTargetSearch(e.target.value)}
+                  placeholder="Filter workspace targets…"
+                />
+              </label>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#64748b]">
             <div className="space-y-0.5">
@@ -1090,58 +1300,142 @@ export function OperationsJobsPanel({
               <div className="dm-skeleton h-12 w-full" />
               <div className="dm-skeleton h-12 w-4/5" />
             </div>
-          ) : !jobs.length ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
-              <ListChecks size={26} className="text-[#94a3b8]" />
-              <h3 className="text-sm font-semibold text-[#0f172a]">No recorded cases yet</h3>
-              <p className="max-w-md text-xs leading-relaxed text-[#64748b]">
-                Select a predefined workflow and workspace target in New case above to open a case.
-                Recorded checks, timestamped evidence, reports, and proposed changes will appear
-                here.
-              </p>
-            </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,0.92fr)_minmax(0,1.4fr)]">
-              {/* Left Column: Filterable Case Queue */}
-              <div className="min-w-0 border-b border-[#e2e8f0] lg:border-b-0 lg:border-r">
-                <div className="space-y-2.5 border-b border-[#e2e8f0] bg-[#f8fafc] p-4">
-                  <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter cases by status">
-                    {(
-                      [
-                        ['all', 'All', jobs.length],
-                        ['draft', 'Draft', draftCount],
-                        ['review', 'Awaiting review', reviewCount],
-                        ['attention', 'Failed / held', attentionCount],
-                        ['active', 'Active', activeRunCount],
-                        [
-                          'succeeded',
-                          'Finished',
-                          jobs.filter((j) => ['succeeded', 'completed'].includes(j.status)).length,
-                        ],
-                      ] as const
-                    ).map(([id, label, count]) => {
-                      const active = statusFilter === id;
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => setStatusFilter(id)}
-                          className={`whitespace-nowrap shrink-0 rounded-md px-2 py-1 text-[11px] font-medium tabular-nums transition-colors ${
+            <>
+              {/* Visual Case Inbox Status Filter Chips */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[#e2e8f0] bg-[#f8fafc] px-4 py-3 sm:px-5">
+                <div
+                  className="flex flex-wrap items-center gap-1.5"
+                  role="group"
+                  aria-label="Filter cases by status"
+                >
+                  {(
+                    [
+                      {
+                        id: 'all' as const,
+                        label: 'All',
+                        count: jobs.length,
+                        dot: null,
+                        activeClass: 'border-[#0f172a] bg-[#0f172a] text-white',
+                        countClass: 'bg-white/15 text-white',
+                      },
+                      {
+                        id: 'draft' as const,
+                        label: 'Draft',
+                        count: draftCount,
+                        dot: 'bg-[#64748b]',
+                        activeClass: 'border-[#475569] bg-[#f1f5f9] text-[#0f172a]',
+                        countClass: 'bg-[#e2e8f0] text-[#0f172a]',
+                      },
+                      {
+                        id: 'active' as const,
+                        label: 'Active',
+                        count: activeRunCount,
+                        dot: 'bg-[#2563eb]',
+                        activeClass: 'border-[#93c5fd] bg-[#eff6ff] text-[#1d4ed8]',
+                        countClass: 'bg-[#dbeafe] text-[#1d4ed8]',
+                      },
+                      {
+                        id: 'paused' as const,
+                        label: 'Paused',
+                        count: pausedCaseCount,
+                        dot: 'bg-[#d97706]',
+                        activeClass: 'border-[#fcd34d] bg-[#fffbeb] text-[#92400e]',
+                        countClass: 'bg-[#fde68a] text-[#78350f]',
+                      },
+                      {
+                        id: 'completed' as const,
+                        label: 'Completed',
+                        count: completedCount,
+                        dot: 'bg-[#16a34a]',
+                        activeClass: 'border-[#86efac] bg-[#f0fdf4] text-[#166534]',
+                        countClass: 'bg-[#dcfce7] text-[#166534]',
+                      },
+                      {
+                        id: 'review' as const,
+                        label: 'Awaiting review',
+                        count: reviewCount,
+                        dot: 'bg-[#b45309]',
+                        activeClass: 'border-[#fcd34d] bg-[#fffbeb] text-[#92400e]',
+                        countClass: 'bg-[#fde68a] text-[#78350f]',
+                      },
+                      {
+                        id: 'failed' as const,
+                        label: 'Failed',
+                        count: failedCount,
+                        dot: 'bg-[#dc2626]',
+                        activeClass: 'border-[#fca5a5] bg-[#fef2f2] text-[#991b1b]',
+                        countClass: 'bg-[#fee2e2] text-[#991b1b]',
+                      },
+                    ]
+                  ).map((chip) => {
+                    const active = statusFilter === chip.id;
+                    return (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() =>
+                          setStatusFilter(
+                            active && chip.id !== 'all' ? 'all' : chip.id
+                          )
+                        }
+                        className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#1d4ed8] ${
+                          active
+                            ? chip.activeClass
+                            : 'border-[#e2e8f0] bg-white text-[#475569] hover:border-[#cbd5e1] hover:text-[#0f172a]'
+                        }`}
+                      >
+                        {chip.dot && (
+                          <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-full ${chip.dot}`}
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span>{chip.label}</span>
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
                             active
-                              ? 'bg-[#0f172a] text-white'
-                              : 'border border-[#e2e8f0] bg-white text-[#475569] hover:text-[#0f172a]'
+                              ? chip.countClass
+                              : 'bg-[#f1f5f9] text-[#64748b]'
                           }`}
                         >
-                          {label} {count}
-                        </button>
-                      );
-                    })}
-                  </div>
+                          {chip.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="sr-only">Filter cases by workflow</span>
+                {statusFilter !== 'all' && (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-[#1d4ed8] hover:underline"
+                    onClick={() => setStatusFilter('all')}
+                  >
+                    Reset status
+                  </button>
+                )}
+              </div>
+
+              {!jobs.length ? (
+                <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
+                  <ListChecks size={26} className="text-[#94a3b8]" />
+                  <h3 className="text-sm font-semibold text-[#0f172a]">No recorded cases yet</h3>
+                  <p className="max-w-md text-xs leading-relaxed text-[#64748b]">
+                    Select a predefined workflow and workspace target in New case above to save a
+                    draft or start a case. Recorded checks, timestamped evidence, reports, and
+                    proposed changes will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,0.92fr)_minmax(0,1.4fr)]">
+                  {/* Left Column: Filterable Case Queue */}
+                  <div className="min-w-0 border-b border-[#e2e8f0] lg:border-b-0 lg:border-r">
+                    <div className="space-y-2.5 border-b border-[#e2e8f0] bg-[#f8fafc] p-4">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="sr-only">Filter cases by workflow</span>
                       <select
                         className="dm-input h-9 w-full text-xs"
                         value={workflowFilter}
@@ -1316,8 +1610,23 @@ export function OperationsJobsPanel({
                             inspectedJob.workflow.replaceAll('-', ' ')}
                         </h3>
                         <p className="mt-0.5 break-all text-xs text-[#475569] tabular-nums">
-                          Target: <strong className="font-medium text-[#0f172a]">{inspectedJob.target || 'Not recorded'}</strong> · Updated{' '}
-                          {formatStamp(inspectedJob.updated_at)}
+                          Target:{' '}
+                          <strong className="font-medium text-[#0f172a]">
+                            {inspectedJob.target || 'Not recorded'}
+                          </strong>{' '}
+                          · Updated {formatStamp(inspectedJob.updated_at)}
+                          {(inspectedJob.skill_name || inspectedJob.skill_id) && (
+                            <>
+                              {' '}
+                              · Workspace skill:{' '}
+                              <strong className="font-medium text-[#0f172a]">
+                                {inspectedJob.skill_name || inspectedJob.skill_id}
+                              </strong>
+                              {inspectedJob.skill_revision != null
+                                ? ` (rev ${inspectedJob.skill_revision})`
+                                : ''}
+                            </>
+                          )}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -1620,11 +1929,11 @@ export function OperationsJobsPanel({
                       )}
                     </section>
 
-                    {/* Timestamped Checks & Evidence Ledger */}
+                    {/* Timestamped Checks & Run Evidence Ledger */}
                     <section className="rounded-lg border border-[#e2e8f0] bg-white p-4">
                       <div className="flex items-center justify-between gap-2">
                         <h4 className="text-sm font-semibold text-[#0f172a]">
-                          Checks &amp; recorded evidence
+                          Run evidence · Recorded checks
                         </h4>
                         <span className="text-xs tabular-nums text-[#64748b]">
                           {detailLoading
@@ -1687,6 +1996,49 @@ export function OperationsJobsPanel({
                       )}
                     </section>
 
+                    {/* Recorded Subagents (only when present in recorded API results) */}
+                    {inspectedSubagents.length > 0 && (
+                      <section className="rounded-lg border border-[#e2e8f0] bg-white p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-sm font-semibold text-[#0f172a]">
+                            Recorded subagents
+                          </h4>
+                          <span className="text-xs tabular-nums text-[#64748b]">
+                            {inspectedSubagents.length} recorded
+                          </span>
+                        </div>
+                        <ul className="mt-3 divide-y divide-[#f1f5f9] text-xs">
+                          {inspectedSubagents.map((sub, idx) => (
+                            <li
+                              key={sub.id || `${sub.name || 'subagent'}-${idx}`}
+                              className="py-2.5 first:pt-0 last:pb-0"
+                            >
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <span className="font-semibold text-[#0f172a]">
+                                  {sub.name || sub.role || `Subagent ${idx + 1}`}
+                                </span>
+                                <div className="flex items-center gap-2 tabular-nums">
+                                  {sub.status && (
+                                    <span className={`font-semibold ${statusTextTone(sub.status)}`}>
+                                      {formatStatusLabel(sub.status)}
+                                    </span>
+                                  )}
+                                  {sub.completed_at && (
+                                    <span className="text-[#64748b]">
+                                      {formatStamp(sub.completed_at)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {sub.summary && (
+                                <p className="mt-1 leading-relaxed text-[#475569]">{sub.summary}</p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
                     {/* Collapsed Technical Details (only when backed by API fields) */}
                     {hasTechnicalDetails && (
                       <details className="rounded-lg border border-[#e2e8f0] bg-white px-4 py-3 text-xs">
@@ -1744,100 +2096,53 @@ export function OperationsJobsPanel({
                 )}
               </div>
             </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* TAB 2: PREDEFINED WORKFLOWS */}
+        {/* TAB 2: AGENT BOARD & WORKSPACE SKILLS */}
         <div
           role="tabpanel"
-          id="ops-desk-panel-workflows"
-          aria-labelledby="ops-desk-tab-workflows"
-          hidden={tab !== 'workflows'}
-          className="space-y-4 p-6"
+          id="ops-desk-panel-board"
+          aria-labelledby="ops-desk-tab-board"
+          hidden={tab !== 'board'}
         >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-[#0f172a]">Predefined workflows</h3>
-              <p className="mt-0.5 text-xs text-[#64748b]">
-                Workspace owners can select from these fixed read-only workflows to open a case. No
-                new arbitrary agents or tools are created here.
-              </p>
-            </div>
-            <span className="text-xs font-medium text-[#475569]">Read-only evidence checks</span>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {SKILLS.map((skill) => {
-              const Icon = skill.icon;
-              const targetCount = state?.targets[skill.id]?.length ?? null;
-              const researchRequired = ['company-enrichment', 'people-enrichment'].includes(
-                skill.id
-              );
-              const isSelected = workflow === skill.id;
-              return (
-                <article
-                  key={skill.id}
-                  className={`flex flex-col justify-between rounded-lg border p-4 ${
-                    isSelected
-                      ? 'border-[#93c5fd] bg-[#eff6ff]/40'
-                      : 'border-[#e2e8f0] bg-white'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Icon size={16} className="shrink-0 text-[#475569]" />
-                        <h4 className="text-sm font-semibold text-[#0f172a]">{skill.title}</h4>
-                      </div>
-                      <span className="text-[11px] font-medium tabular-nums text-[#64748b]">
-                        {targetCount == null
-                          ? '—'
-                          : `${targetCount} target${targetCount === 1 ? '' : 's'}`}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-xs leading-relaxed text-[#475569]">{skill.text}</p>
-                    <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#64748b]">
-                      {skill.steps.map((stepName, idx) => (
-                        <li key={stepName} className="inline-flex items-center gap-1">
-                          <span className="font-semibold text-[#0f172a]">{idx + 1}.</span>
-                          <span>{stepName}</span>
-                        </li>
-                      ))}
-                    </ol>
-                    {researchRequired && state && !state.research_configured && (
-                      <p className="mt-2 text-[11px] font-medium text-[#b45309]">
-                        Requires public research connection in Connections.
-                      </p>
-                    )}
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[#f1f5f9] pt-3 text-xs">
-                    <button
-                      type="button"
-                      className="font-semibold text-[#1d4ed8] hover:underline"
-                      onClick={() => {
-                        setWorkflow(skill.id);
-                        setTarget('');
-                        setTargetSearch('');
-                        newCaseRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }}
-                    >
-                      Select in New case
-                    </button>
-                    <button
-                      type="button"
-                      className="font-medium text-[#475569] hover:text-[#0f172a]"
-                      onClick={() => {
-                        setWorkflow(skill.id);
-                        setTab('instructions');
-                      }}
-                    >
-                      Instructions
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          <OperationsAgentBoard
+            workflows={SKILLS}
+            workflowNames={WORKFLOW_NAMES}
+            stateLoaded={Boolean(state)}
+            ready={ready}
+            paused={paused}
+            decisionServiceOn={decisionServiceOn}
+            researchConfigured={Boolean(state?.research_configured)}
+            automaticWorkflows={state?.automatic_workflows || []}
+            policyEnabled={Boolean(state?.policy.enabled)}
+            policyWorkflows={state?.policy.workflows || []}
+            targets={state?.targets || {}}
+            workflowSkillsMap={state?.workflow_skills}
+            jobs={jobs}
+            skills={skills}
+            skillsLoading={skillsLoading}
+            skillsUnavailable={skillsUnavailable}
+            skillsError={skillsError}
+            canEditSkills={canEditSkills}
+            onReloadSkills={() => loadSkills(true)}
+            onSaveSkill={handleSaveSkill}
+            onPublishSkill={handlePublishSkill}
+            onSelectWorkflowForNewCase={handleSelectWorkflowForNewCase}
+            onInspectJobInInbox={handleInspectJobInInbox}
+            onFilterInboxByWorkflow={handleFilterInboxByWorkflow}
+            onOpenInstructions={(wfId) => {
+              setWorkflow(wfId);
+              setTab('instructions');
+            }}
+            onNavigateTab={onNavigateTab}
+            formatStamp={formatStamp}
+            formatStatusLabel={formatStatusLabel}
+            statusTextTone={statusTextTone}
+            hasPendingProposal={hasPendingProposal}
+          />
         </div>
 
         {/* TAB 3: AUTOMATIC TRIGGERS */}
@@ -2002,7 +2307,10 @@ export function OperationsJobsPanel({
                 light={light}
                 expanded
                 save={async (body) => {
-                  const value = await mutate('/v1/operations/instructions', body);
+                  const value = await mutate<{ instructions: InstructionProfile }>(
+                    '/v1/operations/instructions',
+                    body
+                  );
                   await refresh();
                   return value.instructions;
                 }}

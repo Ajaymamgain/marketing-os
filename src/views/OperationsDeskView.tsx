@@ -19,8 +19,9 @@ export const OperationsDeskView: React.FC<OperationsDeskViewProps> = ({ onNaviga
         <div>
           <h1>Operations Desk</h1>
           <p>
-            Triage recorded operational cases, inspect timestamped check evidence, and review
-            proposed changes before anything touches a connected destination.
+            See what this workspace can run and what needs attention. Review Case Inbox evidence,
+            manage Agent Board workflows and workspace skills, and inspect proposed changes before
+            anything touches a connected destination.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
